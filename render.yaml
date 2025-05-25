@@ -6,3 +6,4 @@ services:
     plan: free
     startCommand: python bot_hyperliquid.py
 
+
