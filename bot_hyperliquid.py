@@ -11,10 +11,11 @@ from telegram.ext import (
 )
 import nest_asyncio
 import logging
+import aiohttp
 
 nest_asyncio.apply()
 
-# --- Servidor HTTP para mantener vivo en Render ---
+# --- Servidor HTTP simple para Render ---
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -28,43 +29,40 @@ def run_server():
 
 Thread(target=run_server, daemon=True).start()
 
-# --- Configuración del bot ---
+# --- Configuración bot Telegram ---
 TOKEN = os.getenv("TOKEN")
-USER_ID = 980727505  # Puedes eliminarlo si usas múltiples usuarios
 
 user_addresses = {}
+
 ADD_ADDRESS, ADD_NAME = range(2)
 REMOVE_SELECT = 3
+POSITIONS_SELECT = 4
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- WebSocket Listener ---
+# --- WebSocket handler ---
 async def listen_to_ws():
     uri = "wss://api.hyperliquid.xyz/ws"
     while True:
         try:
             async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as websocket:
                 print("Conectado al WebSocket de Hyperliquid")
-
                 for user_id, addresses in user_addresses.items():
                     for addr in addresses:
-                        for channel in ["userFills", "userState"]:
-                            msg = {
-                                "method": "subscribe",
-                                "subscription": {
-                                    "type": channel,
-                                    "user": addr["address"]
-                                }
+                        msg = {
+                            "method": "subscribe",
+                            "subscription": {
+                                "type": "userFills",
+                                "user": addr["address"]
                             }
-                            await websocket.send(json.dumps(msg))
+                        }
+                        await websocket.send(json.dumps(msg))
 
                 while True:
                     response = await websocket.recv()
                     data = json.loads(response)
-                    print("🔵 WebSocket response:", json.dumps(data, indent=2))  # Debug
 
-                    # Fills (operaciones)
                     if data.get("channel") == "userFills":
                         fills = data.get("data", {}).get("fills", [])
                         if fills:
@@ -88,47 +86,19 @@ async def listen_to_ws():
                                 for addr in addresses:
                                     if addr["address"] == username:
                                         await app.bot.send_message(chat_id=user_id, text=text)
-
-                    # Positions (posiciones abiertas)
-                    elif data.get("channel") == "userState":
-                        username = data.get("user")
-                        user_data_state = data.get("data", {})
-
-                        positions = user_data_state.get("assetPositions", [])
-
-                        open_positions = [
-                            pos for pos in positions
-                            if float(pos.get("position", 0)) != 0
-                        ]
-
-                        if open_positions:
-                            msg = f"📊 Open positions for {username}:\n"
-                            for pos in open_positions:
-                                msg += (
-                                    f"\n🪙 Coin: {pos.get('coin')}\n"
-                                    f"📦 Size: {pos.get('position')}\n"
-                                    f"🎯 Entry: {pos.get('entryPx')}\n"
-                                    f"📉 Liquidation: {pos.get('liqPx')}\n"
-                                    f"💸 Unrealized PnL: {pos.get('unrealizedPnl')}\n"
-                                )
-
-                            for user_id, addresses in user_addresses.items():
-                                for addr in addresses:
-                                    if addr["address"] == username:
-                                        await app.bot.send_message(chat_id=user_id, text=msg)
-
         except Exception as e:
             print(f"WebSocket error: {e}")
             print("Reconectando en 5 segundos...")
             await asyncio.sleep(5)
 
-# --- Handlers de Telegram ---
+# --- Handlers Telegram ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "¡Welcome! Check the available commands:\n"
         "/add - Add new addresses\n"
         "/remove - Remove tracked addresses\n"
-        "/list - Check all followed addresses"
+        "/list - Check all followed addresses\n"
+        "/positions - Check open positions of a tracked address"
     )
 
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -178,17 +148,15 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Empty list.")
         return ConversationHandler.END
 
-    keyboard = [
-        [InlineKeyboardButton(f"{addr['name']}: {addr['address']}", callback_data=f"toggle_{addr['name']}")]
-        for addr in addresses
-    ]
+    keyboard = []
+    for addr in addresses:
+        keyboard.append([InlineKeyboardButton(f"{addr['name']}: {addr['address']}", callback_data=f"toggle_{addr['name']}")])
     keyboard.append([InlineKeyboardButton("DELETE", callback_data="delete")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
     context.user_data['to_delete'] = set()
 
-    await update.message.reply_text(
-        "Please select the addresses you want to remove:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text("Please select the addresses you want to remove:", reply_markup=reply_markup)
     return REMOVE_SELECT
 
 async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,10 +171,10 @@ async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("You didn't select anything yet!")
             return ConversationHandler.END
 
-        user_addresses[user_id] = [
-            a for a in user_addresses.get(user_id, [])
-            if a["name"] not in to_delete
-        ]
+        addresses = user_addresses.get(user_id, [])
+        addresses = [a for a in addresses if a["name"] not in to_delete]
+        user_addresses[user_id] = addresses
+
         await query.edit_message_text("Erased!")
         return ConversationHandler.END
     else:
@@ -219,16 +187,75 @@ async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
             selected.add(name)
 
         addresses = user_addresses.get(user_id, [])
-        keyboard = [
-            [InlineKeyboardButton(
-                f"{'✅ ' if addr['name'] in selected else ''}{addr['name']}: {addr['address']}",
-                callback_data=f"toggle_{addr['name']}"
-            )] for addr in addresses
-        ]
+        keyboard = []
+        for addr in addresses:
+            prefix = "✅ " if addr['name'] in selected else ""
+            keyboard.append([InlineKeyboardButton(f"{prefix}{addr['name']}: {addr['address']}", callback_data=f"toggle_{addr['name']}")])
         keyboard.append([InlineKeyboardButton("DELETE", callback_data="delete")])
 
-        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_reply_markup(reply_markup=reply_markup)
         return REMOVE_SELECT
+
+# --- Nuevo handler para /positions ---
+async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    addresses = user_addresses.get(user_id, [])
+
+    if not addresses:
+        await update.message.reply_text("Your list is empty.")
+        return ConversationHandler.END
+
+    keyboard = [
+        [InlineKeyboardButton(f"{addr['name']}", callback_data=f"positions_{addr['address']}")]
+        for addr in addresses
+    ]
+    await update.message.reply_text(
+        "Select the address to check positions:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return POSITIONS_SELECT
+
+async def positions_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    address = query.data.split("_", 1)[1]
+
+    url = "https://api.hyperliquid.xyz/info"
+    payload = {
+        "type": "userState",
+        "user": address
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                data = await resp.json()
+
+                positions = data.get("assetPositions", [])
+                open_positions = [p for p in positions if float(p.get("position", 0)) != 0]
+
+                if not open_positions:
+                    await query.edit_message_text("No open positions found.")
+                    return ConversationHandler.END
+
+                msg = f"📊 Open positions for {address}:\n"
+                for pos in open_positions:
+                    msg += (
+                        f"\n🪙 Coin: {pos.get('coin')}\n"
+                        f"📦 Size: {pos.get('position')}\n"
+                        f"🎯 Entry: {pos.get('entryPx')}\n"
+                        f"📉 Liquidation: {pos.get('liqPx')}\n"
+                        f"💸 Unrealized PnL: {pos.get('unrealizedPnl')}\n"
+                    )
+
+                await query.edit_message_text(msg)
+                return ConversationHandler.END
+
+    except Exception as e:
+        await query.edit_message_text(f"❌ Error getting positions: {str(e)}")
+        return ConversationHandler.END
 
 # --- Main ---
 async def main():
@@ -252,12 +279,20 @@ async def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    positions_conv = ConversationHandler(
+        entry_points=[CommandHandler("positions", positions)],
+        states={
+            POSITIONS_SELECT: [CallbackQueryHandler(positions_select, pattern="^positions_")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(add_conv)
     app.add_handler(remove_conv)
     app.add_handler(CommandHandler("list", list_addresses))
+    app.add_handler(positions_conv)
 
-    # Inicia el WebSocket listener en segundo plano
     asyncio.create_task(listen_to_ws())
 
     await app.run_polling()
@@ -266,3 +301,4 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.create_task(main())
     loop.run_forever()
+
