@@ -26,7 +26,6 @@ def run_server():
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
     server.serve_forever()
 
-# Lanzar el servidor HTTP en un hilo daemon para que no bloquee
 Thread(target=run_server, daemon=True).start()
 
 # --- Configuración bot Telegram ---
@@ -50,19 +49,29 @@ async def listen_to_ws():
                 print("Conectado al WebSocket de Hyperliquid")
                 for user_id, addresses in user_addresses.items():
                     for addr in addresses:
-                        msg = {
+                        subscription = {
                             "method": "subscribe",
                             "subscription": {
                                 "type": "userFills",
                                 "user": addr["address"]
                             }
                         }
-                        await websocket.send(json.dumps(msg))
+                        await websocket.send(json.dumps(subscription))
+
+                        subscription_positions = {
+                            "method": "subscribe",
+                            "subscription": {
+                                "type": "userState",
+                                "user": addr["address"]
+                            }
+                        }
+                        await websocket.send(json.dumps(subscription_positions))
 
                 while True:
                     response = await websocket.recv()
                     data = json.loads(response)
 
+                    # Notificaciones de operaciones
                     if data.get("channel") == "userFills":
                         fills = data.get("data", {}).get("fills", [])
                         if fills:
@@ -86,6 +95,36 @@ async def listen_to_ws():
                                 for addr in addresses:
                                     if addr["address"] == username:
                                         await app.bot.send_message(chat_id=user_id, text=text)
+
+                    # Notificaciones de posiciones abiertas
+                    elif data.get("channel") == "userState":
+                        username = data.get("user")
+                        positions = data.get("data", {}).get("assetPositions", [])
+
+                        msg = f"📊 Open positions for {username}:\n"
+                        any_position = False
+
+                        for pos in positions:
+                            if float(pos.get("position", 0)) != 0:
+                                any_position = True
+                                coin = pos.get("coin")
+                                pos_size = pos.get("position")
+                                entry_price = pos.get("entryPx")
+                                unrealized_pnl = pos.get("unrealizedPnl")
+                                liq_price = pos.get("liqPx")
+                                msg += (
+                                    f"\n🪙 Coin: {coin}\n"
+                                    f"📦 Size: {pos_size}\n"
+                                    f"🎯 Entry: {entry_price}\n"
+                                    f"📉 Liquidation: {liq_price}\n"
+                                    f"💸 Unrealized PnL: {unrealized_pnl}\n"
+                                )
+
+                        if any_position:
+                            for user_id, addresses in user_addresses.items():
+                                for addr in addresses:
+                                    if addr["address"] == username:
+                                        await app.bot.send_message(chat_id=user_id, text=msg)
         except Exception as e:
             print(f"WebSocket error: {e}")
             print("Reconectando en 5 segundos...")
@@ -223,13 +262,10 @@ async def main():
     app.add_handler(remove_conv)
     app.add_handler(CommandHandler("list", list_addresses))
 
-    # Lanzar listener WebSocket en segundo plano
     asyncio.create_task(listen_to_ws())
-
     await app.run_polling()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.create_task(main())
     loop.run_forever()
-
