@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: hyperliquid-bot
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: python bot_hyperliquid.py
+    envVars:
+      - key: TOKEN
+        value: tu_token_de_telegram_aqui
