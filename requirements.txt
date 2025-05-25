@@ -1,4 +1,4 @@
 aiohttp
+python-telegram-bot==20.0
 websockets
-python-telegram-bot>=20
 nest_asyncio
