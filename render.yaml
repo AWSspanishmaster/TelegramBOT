@@ -2,13 +2,7 @@ services:
   - type: web
     name: bot-hyperliquid
     env: python
-    plan: free  # o el plan que uses
-    region: oregon  # o la región que prefieras
-    branch: main  # la rama de tu repositorio que quieres desplegar
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot_hyperliquid.py"
-    envVars:
-      - key: TOKEN
-        fromSecret: TOKEN  # si usas secretos en Render
-    ports:
-      - 10000  # o usa $PORT si el código lo recoge de la variable PORT
+    plan: starter
+    # Comando para arrancar tu bot
+    startCommand: python bot_hyperliquid.py
+ 
