@@ -11,7 +11,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 nest_asyncio.apply()
 
 # Reemplaza esto con tu token de bot
-TELEGRAM_TOKEN = "TU_TOKEN_AQUI"
+TOKEN = os.getenv("TOKEN")
 
 # Diccionario para guardar direcciones por usuario
 user_addresses = {}
