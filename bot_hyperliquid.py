@@ -12,7 +12,8 @@ import logging
 nest_asyncio.apply()
 
 # Telegram credentials
-TOKEN = '8162933364:AAF-1H60Iydjb6o2Y0Q1tSgpI12HKx02s5o'
+import os
+TOKEN = os.getenv("TOKEN")
 USER_ID = 980727505
 
 # Diccionario para almacenar usuarios y direcciones
