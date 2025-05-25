@@ -7,6 +7,7 @@ import nest_asyncio
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from aiohttp import web
 
 # Aplica nest_asyncio para entornos como Render
 nest_asyncio.apply()
@@ -111,10 +112,23 @@ async def fetch_fills(address: str) -> str:
                 f"📈 {direction} {size} {coin} at an average price of ${price}\n"
                 f"💰 ${start_pos}"
             )
-        except Exception as e:
+        except Exception:
             continue
 
     return "\n\n".join(messages)
+
+# Servidor HTTP básico para que Render no haga timeout
+async def handle_root(request):
+    return web.Response(text="Bot is running!")
+
+async def run_web_server():
+    app = web.Application()
+    app.add_routes([web.get("/", handle_root)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
 
 # Main
 def main():
@@ -127,8 +141,12 @@ def main():
     app.add_handler(CommandHandler("positions", positions))
     app.add_handler(CallbackQueryHandler(button_handler))
 
+    # Ejecuta bot y servidor web en paralelo
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_web_server())
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
 
