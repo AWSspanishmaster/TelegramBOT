@@ -120,7 +120,7 @@ async def fetch_fills(address: str) -> str:
 
 # Main
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add))
