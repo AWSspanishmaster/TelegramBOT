@@ -1,20 +1,6 @@
 import os
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'Bot is running')
-
-def run_server():
-    port = int(os.environ.get("PORT", 8000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
-    server.serve_forever()
-
-# Lanzar el servidor en un hilo separado para que no bloquee
-Thread(target=run_server, daemon=True).start()
 import asyncio
 import json
 import websockets
@@ -28,23 +14,34 @@ import logging
 
 nest_asyncio.apply()
 
-# Telegram credentials
-import os
+# --- Servidor HTTP simple para Render ---
+class SimpleHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Bot is running')
+
+def run_server():
+    port = int(os.environ.get("PORT", 8000))
+    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    server.serve_forever()
+
+# Lanzar el servidor HTTP en un hilo daemon para que no bloquee
+Thread(target=run_server, daemon=True).start()
+
+# --- Configuración bot Telegram ---
 TOKEN = os.getenv("TOKEN")
 USER_ID = 980727505
 
-# Diccionario para almacenar usuarios y direcciones
 user_addresses = {}
 
-# Estados de conversación
 ADD_ADDRESS, ADD_NAME = range(2)
 REMOVE_SELECT = 3
 
-# Logger para debug
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# WebSocket handler
+# --- WebSocket handler ---
 async def listen_to_ws():
     uri = "wss://api.hyperliquid.xyz/ws"
     while True:
@@ -77,10 +74,10 @@ async def listen_to_ws():
                             sz = fill_info.get("sz")
 
                             text = (
-                                f"📢 Nuevo fill detectado\n"
+                                f"📢 New operation detected\n"
                                 f"👤 Trader: {username}\n"
                                 f"🪙 Coin: {coin}\n"
-                                f"📈 Opèration: {side}\n"
+                                f"📈 Type: {side}\n"
                                 f"💰 Price: {px}\n"
                                 f"📦 Size: {sz}"
                             )
@@ -94,16 +91,15 @@ async def listen_to_ws():
             print("Reconectando en 5 segundos...")
             await asyncio.sleep(5)
 
-# Start
+# --- Handlers Telegram ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "¡Welcomwe! Check the available commands in the list below:\n"
+        "¡Welcome! Check the available commands:\n"
         "/add - Add new addresses\n"
         "/remove - Remove tracked addresses\n"
-        "/list - Check all the followed addresses"
+        "/list - Check all followed addresses"
     )
 
-# ADD flow
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Please introduce the address")
     return ADD_ADDRESS
@@ -129,7 +125,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cancelled.")
     return ConversationHandler.END
 
-# LIST
 async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     addresses = user_addresses.get(user_id, [])
@@ -144,7 +139,6 @@ async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg)
 
-# REMOVE flow con selección múltiple con ticks y botón DELETE
 async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     addresses = user_addresses.get(user_id, [])
@@ -161,7 +155,7 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     context.user_data['to_delete'] = set()
 
-    await update.message.reply_text("Please select the addresses you need to be removed:", reply_markup=reply_markup)
+    await update.message.reply_text("Please select the addresses you want to remove:", reply_markup=reply_markup)
     return REMOVE_SELECT
 
 async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,7 +185,6 @@ async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             selected.add(name)
 
-        # Reconstruir teclado con marcas de selección
         addresses = user_addresses.get(user_id, [])
         keyboard = []
         for addr in addresses:
@@ -203,7 +196,7 @@ async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=reply_markup)
         return REMOVE_SELECT
 
-# Main
+# --- Main ---
 async def main():
     global app
     app = ApplicationBuilder().token(TOKEN).build()
@@ -230,7 +223,9 @@ async def main():
     app.add_handler(remove_conv)
     app.add_handler(CommandHandler("list", list_addresses))
 
+    # Lanzar listener WebSocket en segundo plano
     asyncio.create_task(listen_to_ws())
+
     await app.run_polling()
 
 if __name__ == "__main__":
