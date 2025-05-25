@@ -1,10 +1,11 @@
 services:
-  - type: web
-    name: hyperliquid-bot
+  - type: worker
+    name: telegram-bot-hyperliquid
     env: python
     plan: free
-    buildCommand: ""
-    startCommand: python bot_hyperliquid.py
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python main.py
     envVars:
       - key: TOKEN
-        value: tu_token_de_telegram_aqui
+        fromDatabase: true  # o pon el valor aquí directamente si quieres
