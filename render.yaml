@@ -2,6 +2,7 @@ services:
   - type: web
     name: bot-hyperliquid
     env: python
+    port: 8080
     plan: starter
     # Comando para arrancar tu bot
     startCommand: python bot_hyperliquid.py
