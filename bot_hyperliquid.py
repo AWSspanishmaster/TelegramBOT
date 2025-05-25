@@ -4,6 +4,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import asyncio
 import json
 import websockets
+import aiohttp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes,
@@ -11,7 +12,6 @@ from telegram.ext import (
 )
 import nest_asyncio
 import logging
-import aiohttp
 
 nest_asyncio.apply()
 
@@ -31,23 +31,21 @@ Thread(target=run_server, daemon=True).start()
 
 # --- Configuración bot Telegram ---
 TOKEN = os.getenv("TOKEN")
-
 user_addresses = {}
 
 ADD_ADDRESS, ADD_NAME = range(2)
 REMOVE_SELECT = 3
-POSITIONS_SELECT = 4
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- WebSocket handler ---
+# --- WebSocket para operaciones ---
 async def listen_to_ws():
     uri = "wss://api.hyperliquid.xyz/ws"
     while True:
         try:
             async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as websocket:
-                print("Conectado al WebSocket de Hyperliquid")
+                print("✅ Connected to Hyperliquid WebSocket")
                 for user_id, addresses in user_addresses.items():
                     for addr in addresses:
                         msg = {
@@ -88,26 +86,47 @@ async def listen_to_ws():
                                         await app.bot.send_message(chat_id=user_id, text=text)
         except Exception as e:
             print(f"WebSocket error: {e}")
-            print("Reconectando en 5 segundos...")
             await asyncio.sleep(5)
+
+# --- Obtener posiciones abiertas ---
+async def get_positions(address):
+    url = "https://api.hyperliquid.xyz/info"
+    payload = {
+        "type": "allPositions",
+        "user": address
+    }
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                else:
+                    text = await resp.text()
+                    print(f"Error {resp.status}: {text}")
+                    return {"error": f"{resp.status} - {text}"}
+    except Exception as e:
+        print(f"Exception getting positions: {e}")
+        return {"error": str(e)}
 
 # --- Handlers Telegram ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "¡Welcome! Check the available commands:\n"
-        "/add - Add new addresses\n"
-        "/remove - Remove tracked addresses\n"
-        "/list - Check all followed addresses\n"
-        "/positions - Check open positions of a tracked address"
+        "👋 Welcome! Available commands:\n"
+        "/add - Add address\n"
+        "/remove - Remove address\n"
+        "/list - View followed addresses\n"
+        "/positions - View open positions"
     )
 
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Please introduce the address")
+    await update.message.reply_text("Please enter the address:")
     return ADD_ADDRESS
 
 async def add_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_address"] = update.message.text
-    await update.message.reply_text("Now name it")
+    await update.message.reply_text("Now name it:")
     return ADD_NAME
 
 async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -119,11 +138,11 @@ async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_addresses[user_id] = []
 
     user_addresses[user_id].append({"name": name, "address": address})
-    await update.message.reply_text("✅ Done")
+    await update.message.reply_text("✅ Address added!")
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Cancelled.")
+    await update.message.reply_text("❌ Cancelled.")
     return ConversationHandler.END
 
 async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,10 +150,10 @@ async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     addresses = user_addresses.get(user_id, [])
 
     if not addresses:
-        await update.message.reply_text("Empty list")
+        await update.message.reply_text("Your list is empty.")
         return
 
-    msg = "📋 Addresses already tracked:\n"
+    msg = "📋 Tracked addresses:\n"
     for addr in addresses:
         msg += f"- {addr['name']}: {addr['address']}\n"
 
@@ -145,18 +164,19 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     addresses = user_addresses.get(user_id, [])
 
     if not addresses:
-        await update.message.reply_text("Empty list.")
+        await update.message.reply_text("Your list is empty.")
         return ConversationHandler.END
 
-    keyboard = []
-    for addr in addresses:
-        keyboard.append([InlineKeyboardButton(f"{addr['name']}: {addr['address']}", callback_data=f"toggle_{addr['name']}")])
+    keyboard = [
+        [InlineKeyboardButton(f"{addr['name']}: {addr['address']}", callback_data=f"toggle_{addr['name']}")]
+        for addr in addresses
+    ]
     keyboard.append([InlineKeyboardButton("DELETE", callback_data="delete")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     context.user_data['to_delete'] = set()
 
-    await update.message.reply_text("Please select the addresses you want to remove:", reply_markup=reply_markup)
+    await update.message.reply_text("Select addresses to remove:", reply_markup=reply_markup)
     return REMOVE_SELECT
 
 async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,14 +188,14 @@ async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "delete":
         to_delete = context.user_data.get('to_delete', set())
         if not to_delete:
-            await query.edit_message_text("You didn't select anything yet!")
+            await query.edit_message_text("No address selected.")
             return ConversationHandler.END
 
         addresses = user_addresses.get(user_id, [])
         addresses = [a for a in addresses if a["name"] not in to_delete]
         user_addresses[user_id] = addresses
 
-        await query.edit_message_text("Erased!")
+        await query.edit_message_text("✅ Addresses removed.")
         return ConversationHandler.END
     else:
         _, name = data.split("_", 1)
@@ -187,75 +207,62 @@ async def remove_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
             selected.add(name)
 
         addresses = user_addresses.get(user_id, [])
-        keyboard = []
-        for addr in addresses:
-            prefix = "✅ " if addr['name'] in selected else ""
-            keyboard.append([InlineKeyboardButton(f"{prefix}{addr['name']}: {addr['address']}", callback_data=f"toggle_{addr['name']}")])
+        keyboard = [
+            [InlineKeyboardButton(f"{'✅ ' if addr['name'] in selected else ''}{addr['name']}: {addr['address']}",
+                                  callback_data=f"toggle_{addr['name']}")]
+            for addr in addresses
+        ]
         keyboard.append([InlineKeyboardButton("DELETE", callback_data="delete")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_reply_markup(reply_markup=reply_markup)
         return REMOVE_SELECT
 
-# --- Nuevo handler para /positions ---
+# --- /positions y selección ---
 async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    user_id = update.effective_user.id
     addresses = user_addresses.get(user_id, [])
 
     if not addresses:
-        await update.message.reply_text("Your list is empty.")
-        return ConversationHandler.END
+        await update.message.reply_text("You don't have any addresses tracked.")
+        return
 
     keyboard = [
-        [InlineKeyboardButton(f"{addr['name']}", callback_data=f"positions_{addr['address']}")]
-        for addr in addresses
+        [InlineKeyboardButton(f"{a['name']} ({a['address']})", callback_data=f"pos_{a['address']}")]
+        for a in addresses
     ]
-    await update.message.reply_text(
-        "Select the address to check positions:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    return POSITIONS_SELECT
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-async def positions_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Select an address to view positions:", reply_markup=reply_markup)
+
+async def show_positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    address = query.data.split("_", 1)[1]
+    if not query.data.startswith("pos_"):
+        return
 
-    url = "https://api.hyperliquid.xyz/info"
-    payload = {
-        "type": "userState",
-        "user": address
-    }
+    address = query.data.split("pos_")[1]
+    positions_data = await get_positions(address)
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as resp:
-                data = await resp.json()
+    if "error" in positions_data:
+        await query.edit_message_text(f"❌ Error getting positions: {positions_data['error']}")
+        return
 
-                positions = data.get("assetPositions", [])
-                open_positions = [p for p in positions if float(p.get("position", 0)) != 0]
+    positions = positions_data.get("assetPositions", [])
+    msg = f"📊 Open Positions for {address}:\n"
+    for pos in positions:
+        coin = pos.get("coin")
+        position = pos.get("position", {})
+        size = position.get("sz")
+        entry = position.get("entryPx")
+        if float(size) > 0:
+            msg += f"\n🪙 {coin}\n📦 Size: {size}\n💰 Entry: {entry}\n"
 
-                if not open_positions:
-                    await query.edit_message_text("No open positions found.")
-                    return ConversationHandler.END
+    if msg.strip() == f"📊 Open Positions for {address}:":
+        msg += "\nNo open positions."
 
-                msg = f"📊 Open positions for {address}:\n"
-                for pos in open_positions:
-                    msg += (
-                        f"\n🪙 Coin: {pos.get('coin')}\n"
-                        f"📦 Size: {pos.get('position')}\n"
-                        f"🎯 Entry: {pos.get('entryPx')}\n"
-                        f"📉 Liquidation: {pos.get('liqPx')}\n"
-                        f"💸 Unrealized PnL: {pos.get('unrealizedPnl')}\n"
-                    )
-
-                await query.edit_message_text(msg)
-                return ConversationHandler.END
-
-    except Exception as e:
-        await query.edit_message_text(f"❌ Error getting positions: {str(e)}")
-        return ConversationHandler.END
+    await query.edit_message_text(msg)
 
 # --- Main ---
 async def main():
@@ -279,26 +286,19 @@ async def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    positions_conv = ConversationHandler(
-        entry_points=[CommandHandler("positions", positions)],
-        states={
-            POSITIONS_SELECT: [CallbackQueryHandler(positions_select, pattern="^positions_")],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(add_conv)
     app.add_handler(remove_conv)
     app.add_handler(CommandHandler("list", list_addresses))
-    app.add_handler(positions_conv)
+    app.add_handler(CommandHandler("positions", positions))
+    app.add_handler(CallbackQueryHandler(show_positions, pattern="^pos_"))
 
     asyncio.create_task(listen_to_ws())
-
     await app.run_polling()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.create_task(main())
     loop.run_forever()
+
 
