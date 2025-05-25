@@ -46,7 +46,7 @@ async def listen_to_ws():
     uri = "wss://api.hyperliquid.xyz/ws"
     while True:
         try:
-            async with websockets.connect(uri) as websocket:
+            async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as websocket:
                 print("Conectado al WebSocket de Hyperliquid")
                 for user_id, addresses in user_addresses.items():
                     for addr in addresses:
@@ -229,4 +229,7 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
+
