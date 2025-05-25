@@ -11,7 +11,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 # Aplica nest_asyncio para entornos como Render
 nest_asyncio.apply()
 
-# Reemplaza esto con tu token de bot
+# Token del bot (usa variable de entorno en Render)
 TOKEN = os.getenv("TOKEN")
 
 # Diccionario para guardar direcciones por usuario
@@ -63,12 +63,11 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 No addresses added.")
         return
 
-    # Crea botones para cada address
     keyboard = [[InlineKeyboardButton(address, callback_data=address)] for address in addresses]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("📌 Select an address to view recent fills:", reply_markup=reply_markup)
 
-# Maneja la selección de una dirección
+# Maneja el botón con dirección seleccionada
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -98,7 +97,6 @@ async def fetch_fills(address: str) -> str:
     except Exception as e:
         return f"❌ Exception: {e}"
 
-    # Formatea el mensaje
     messages = []
     for fill in data[:10]:  # Limita a los 10 más recientes
         try:
@@ -133,3 +131,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
