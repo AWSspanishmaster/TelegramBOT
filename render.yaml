@@ -1,9 +1,11 @@
 services:
-  - type: worker
+  - type: web
     name: telegram-bot-hyperliquid
     env: python
-    envVersion: 3
-    plan: free
-    startCommand: python bot_hyperliquid.py
-
-
+    region: oregon
+    plan: starter
+    build_command: pip install -r requirements.txt
+    start_command: python bot_hyperliquid.py
+    env_vars:
+      - key: TELEGRAM_TOKEN
+        value: tu_token_aqui
