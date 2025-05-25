@@ -69,7 +69,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     address = query.data
     fills = await fetch_fills(address)
     if fills:
-        await query.edit_message_text(f"📈 Recent fills for {address}:\n\n" + fills)
+        # Formatea el mensaje con fills, si quieres detalles específicos lo ajustamos
+        await query.edit_message_text(f"📈 Recent fills for {address}:\n\n{fills}")
     else:
         await query.edit_message_text(f"⚠️ No recent fills or error for {address}.")
 
@@ -109,7 +110,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     timeframe_seconds = valid_times[arg]
     now_ts = int(datetime.now(tz=timezone.utc).timestamp())
-    cutoff_ts = now_ts - timeframe_seconds * 1000
+    cutoff_ts = (now_ts - timeframe_seconds) * 1000  # en milisegundos
 
     summary_data = {}
 
@@ -166,7 +167,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ No fills found in the given timeframe.")
         return
 
-    # Cambiado: ordenar por usd_volume desc
+    # Ordenar monedas por valor en USD descendente y limitar a 10
     sorted_coins = sorted(summary_data.items(), key=lambda x: x[1]["usd_volume"], reverse=True)[:10]
 
     lines = [f"Most traded coins in the last {arg}:"]
@@ -207,7 +208,21 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add))
-    app.add_handler(CommandHandler
+    app.add_handler(CommandHandler("list", list_addresses))
+    app.add_handler(CommandHandler("remove", remove))
+    app.add_handler(CommandHandler("positions", positions))
+    app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_web_server())
+
+    logging.info("Bot started.")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
+
 
 
 
