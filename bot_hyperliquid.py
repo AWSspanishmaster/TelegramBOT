@@ -225,7 +225,7 @@ async def handle_root(request):
     return web.Response(text="✅ Bot is alive!")
 
 async def run_web_server():
-    port = int(os.getenv("PORT", 8080))
+    port = int(os.getenv("PORT", 10000))
     app = web.Application()
     app.add_routes([web.get("/", handle_root)])
     runner = web.AppRunner(app)
