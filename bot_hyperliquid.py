@@ -230,7 +230,7 @@ async def run_web_server():
     app.add_routes([web.get("/", handle_root)])
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    site = web.TCPSite(runner, port=port)
     print(f"🌐 Web server running on port {port}")
     await site.start()
 
