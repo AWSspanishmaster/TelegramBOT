@@ -236,11 +236,13 @@ async def handle_root(request):
     return web.Response(text="Bot is running!")
 
 async def run_web_server():
+    port = int(os.getenv("PORT", 8080))  # Render asigna dinámicamente este puerto
     app = web.Application()
     app.add_routes([web.get("/", handle_root)])
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    print(f"✅ Web server running on port {port}")
     await site.start()
 
 
@@ -259,8 +261,14 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(CommandHandler("summary", summary))
 
-    # Ejecuta servidor web y bot simultáneamente
-    await asyncio.gather(run_web_server(), application.run_polling())
+    # No permitas que ninguna excepción en el bot o en el servidor cierre el proceso
+    try:
+        await asyncio.gather(
+            run_web_server(),
+            application.run_polling()
+        )
+    except Exception as e:
+        logging.error(f"Error in main: {e}")
 
 
 if __name__ == "__main__":
