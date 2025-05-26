@@ -109,12 +109,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     address = query.data
     fills = await fetch_fills(address)
+
     if fills:
         await query.edit_message_text(f"📈 Recent fills for {address}:")
         for f in fills[:5]:
-            await query.message.reply_text(str(f))
+            try:
+                coin = f.get("coin", "?")
+                size = f.get("sz", "?")
+                price = f.get("px", "?")
+                direction = f.get("dir", "?")
+                timestamp = int(f.get("time", 0)) // 1000
+                time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+                msg = f"📊 {coin} | {direction}\nSize: {size} @ ${price}\nTime: {time_str}"
+                await query.message.reply_text(msg)
+            except Exception as e:
+                logging.error(f"Error formatting fill: {e}")
     else:
         await query.edit_message_text(f"⚠️ No recent fills or error for {address}.")
+
 
 # Función para obtener fills desde la API
 async def fetch_fills(address: str):
