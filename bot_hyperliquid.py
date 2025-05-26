@@ -127,7 +127,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(f"⚠️ No recent fills or error for {address}.")
 
-
 # Función para obtener fills desde la API
 async def fetch_fills(address: str):
     url = "https://api.hyperliquid.xyz/info"
@@ -258,34 +257,25 @@ def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
 
-    # Ejecuta servidor web y bot
     loop = asyncio.get_event_loop()
-    try:
-        loop.create_task(run_web_server())
-        async def run_bot():
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.wait_closed()
-    await app.stop()
-    await app.shutdown()
 
-try:
-    loop.run_until_complete(asyncio.gather(run_web_server(), run_bot()))
-except Exception as e:
-    logging.error(f"Unhandled exception: {e}")
-    loop.stop()
-    raise e
-    
+    async def run():
+        await run_web_server()
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling()
+        await app.updater.wait_closed()
+        await app.stop()
+        await app.shutdown()
+
+    try:
+        loop.run_until_complete(run())
     except Exception as e:
         logging.error(f"Unhandled exception: {e}")
-        # En caso de excepción no capturada, cerramos el loop para que Render reinicie
         loop.stop()
         raise e
-    finally:
-        loop.run_until_complete(app.stop())
-        loop.run_until_complete(app.shutdown())
 
 if __name__ == "__main__":
     main()
+
 
