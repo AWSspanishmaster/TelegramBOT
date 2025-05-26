@@ -6,7 +6,7 @@ import nest_asyncio
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
@@ -232,43 +232,36 @@ async def summary_button_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 # Servidor HTTP básico para evitar timeout en Render
 async def handle_root(request):
-    return web.Response(text="Bot is running!")
+    return web.Response(text="✅ Bot is alive")
 
-async def run_web_server():
-    app = web.Application()
-    app.add_routes([web.get("/", handle_root)])
-    runner = web.AppRunner(app)
+# Función principal
+async def main():
+    app = Application.builder().token(TOKEN).build()
+
+    # Handlers del bot
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add", add))
+    app.add_handler(CommandHandler("list", list_addresses))
+    app.add_handler(CommandHandler("remove", remove))
+    app.add_handler(CommandHandler("positions", positions))
+    app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))
+    app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
+
+    # Servidor aiohttp para evitar timeout
+    runner = web.AppRunner(web.Application())
+    app.web_app = runner.app
+    app.web_app.add_routes([web.get("/", handle_root)])
     await runner.setup()
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-# Función principal
-async def main():
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Aquí añades todos tus handlers, comandos, etc.
-    app.add_handler(CommandHandler("start", start))
-    # ... y los demás handlers
-
-    # Aiohttp keep-alive server para Render
-    async def keep_alive(request):
-        return web.Response(text="✅ Bot is alive")
-
-    app.web_app = web.Application()
-    app.web_app.add_routes([web.get("/", keep_alive)])
-
-    # Iniciar bot con polling
-    await app.run_polling()
     print("✅ Bot is running via polling on Render with aiohttp keep-alive")
+    await app.run_polling()
 
-
-
-import asyncio
-import nest_asyncio
-
-nest_asyncio.apply()
-
+# Lanza el bot
 async def safe_main():
     try:
         await main()
@@ -284,6 +277,7 @@ if __name__ == "__main__":
             loop.run_until_complete(safe_main())
         else:
             raise
+
 
 
 
