@@ -243,8 +243,8 @@ async def run_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-# Main
-def main():
+# Función principal
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -257,25 +257,14 @@ def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
 
-    loop = asyncio.get_event_loop()
-
-    async def run():
-        await run_web_server()
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
-        await app.updater.wait_closed()
-        await app.stop()
-        await app.shutdown()
-
-    try:
-        loop.run_until_complete(run())
-    except Exception as e:
-        logging.error(f"Unhandled exception: {e}")
-        loop.stop()
-        raise e
+    # Corre bot y servidor web simultáneamente
+    await asyncio.gather(
+        run_web_server(),
+        app.run_polling()
+    )
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
+
 
 
