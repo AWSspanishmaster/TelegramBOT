@@ -1,5 +1,4 @@
-python-telegram-bot>=20.0
+python-telegram-bot==20.3
 aiohttp
 nest_asyncio
-uvloop ; sys_platform != 'win32'
 
