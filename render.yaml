@@ -2,8 +2,14 @@ services:
   - type: web
     name: bot-hyperliquid
     env: python
-    port: 8080
     plan: starter
-    # Comando para arrancar tu bot
+    branch: main                 # Asegúrate de que sea la rama correcta
+    buildCommand: pip install -r requirements.txt
     startCommand: python bot_hyperliquid.py
- 
+    autoDeploy: true
+    envVars:
+      - key: TOKEN
+        sync: false              # O usa `value: tu_token_aqui` si lo defines directamente
+    healthCheckPath: /
+    ports:
+      - port: 8080
