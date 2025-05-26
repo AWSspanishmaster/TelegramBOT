@@ -200,7 +200,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
             short_pct = 100 - long_pct
 
         lines.append(
-            f"{i}. {coin} - {total_vol:.2f} ({usd_vol:,.2f} USD) LONG {long_pct}% vs SHORT {short_pct}% (Wallets: {wallets_count})"
+            f"{i}. {total_vol:.2f} {coin} (${usd_vol:,.2f}) Long {long_pct}% vs Short {short_pct}% (Wallets: {wallets_count})"
         )
 
     message = "\n".join(lines)
