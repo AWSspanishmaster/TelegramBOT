@@ -245,24 +245,46 @@ async def run_web_server():
 
 # Función principal
 async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # Aquí añades todos tus handlers, comandos, etc.
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add", add))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CommandHandler("list", list_addresses))
-    app.add_handler(CommandHandler("remove", remove))
-    app.add_handler(CommandHandler("positions", positions))
-    app.add_handler(CallbackQueryHandler(button_handler, pattern="^(0x[0-9a-fA-F]{40})$"))
-    app.add_handler(CommandHandler("summary", summary))
-    app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
+    # ... y los demás handlers
 
-    print("✅ Bot is running via polling on Render with aiohttp keep-alive")
+    # Aiohttp keep-alive server para Render
+    async def keep_alive(request):
+        return web.Response(text="✅ Bot is alive")
+
+    app.web_app = web.Application()
+    app.web_app.add_routes([web.get("/", keep_alive)])
+
+    # Iniciar bot con polling
     await app.run_polling()
+    print("✅ Bot is running via polling on Render with aiohttp keep-alive")
 
+
+
+import asyncio
+import nest_asyncio
+
+nest_asyncio.apply()
+
+async def safe_main():
+    try:
+        await main()
+    except Exception as e:
+        print(f"❌ Error in main(): {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(safe_main())
+    except RuntimeError as e:
+        if "Cannot close a running event loop" in str(e):
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(safe_main())
+        else:
+            raise
+
 
 
 
