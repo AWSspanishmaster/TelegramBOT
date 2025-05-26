@@ -250,17 +250,31 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CommandHandler("list", list_addresses))
     app.add_handler(CommandHandler("remove", remove))
     app.add_handler(CommandHandler("positions", positions))
+    app.add_handler(CallbackQueryHandler(button_handler, pattern="^(0x[0-9a-fA-F]{40})$"))
     app.add_handler(CommandHandler("summary", summary))
-    app.add_handler(CallbackQueryHandler(summary_button_handler, pattern=r"^summary_"))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
 
+    # Ejecuta servidor web y bot
     loop = asyncio.get_event_loop()
-    loop.create_task(run_web_server())
-    app.run_polling()
+    try:
+        loop.create_task(run_web_server())
+        loop.run_until_complete(app.initialize())
+        loop.run_until_complete(app.start())
+        loop.run_until_complete(app.updater.start_polling())
+        loop.run_until_complete(app.updater.idle())
+    except Exception as e:
+        logging.error(f"Unhandled exception: {e}")
+        # En caso de excepción no capturada, cerramos el loop para que Render reinicie
+        loop.stop()
+        raise e
+    finally:
+        loop.run_until_complete(app.stop())
+        loop.run_until_complete(app.shutdown())
 
 if __name__ == "__main__":
     main()
+
