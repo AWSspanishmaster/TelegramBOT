@@ -12,4 +12,4 @@ services:
         sync: false              # O usa `value: tu_token_aqui` si lo defines directamente
     healthCheckPath: /
     ports:
-      - port: 8080
+      - port: 10000
