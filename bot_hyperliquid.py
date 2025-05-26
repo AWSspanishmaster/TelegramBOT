@@ -1,5 +1,3 @@
-Esta versión es la mejor por el momento, reemplaza todas las anteriores por esta:
-
 import os
 import logging
 import aiohttp
