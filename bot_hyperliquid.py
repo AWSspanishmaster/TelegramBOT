@@ -215,8 +215,7 @@ async def summary_button_handler(update: Update, context: ContextTypes.DEFAULT_T
         long_pct = round(100 * data["long_volume"] / vol) if vol else 0
         short_pct = 100 - long_pct
 
-       lines.append(f"{i}.- {vol:,.2f} {coin} (${usd:,.2f})\nLong {long_pct}% vs Short {short_pct}% (Wallets: {wallets})\n")
-
+        lines.append(f"{i}. {vol:.2f} {coin} (${usd:,.2f}) Long {long_pct}% vs Short {short_pct}% (Wallets: {wallets})")
 
     await query.message.reply_text("\n".join(lines))
 
