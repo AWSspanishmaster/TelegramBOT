@@ -262,10 +262,21 @@ def main():
     loop = asyncio.get_event_loop()
     try:
         loop.create_task(run_web_server())
-        loop.run_until_complete(app.initialize())
-        loop.run_until_complete(app.start())
-        loop.run_until_complete(app.updater.start_polling())
-        loop.run_until_complete(app.updater.idle())
+        async def run_bot():
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.wait_closed()
+    await app.stop()
+    await app.shutdown()
+
+try:
+    loop.run_until_complete(asyncio.gather(run_web_server(), run_bot()))
+except Exception as e:
+    logging.error(f"Unhandled exception: {e}")
+    loop.stop()
+    raise e
+    
     except Exception as e:
         logging.error(f"Unhandled exception: {e}")
         # En caso de excepción no capturada, cerramos el loop para que Render reinicie
