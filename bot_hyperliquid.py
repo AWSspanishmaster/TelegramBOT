@@ -221,19 +221,22 @@ async def fetch_fills(address: str) -> list:
 
 # --- SERVIDOR HTTP PARA RENDER ---
 
+async def handle_root(request):
+    return web.Response(text="Bot is running!")
+
 async def run_web_server():
-    port = int(os.getenv("PORT", 8080))  # 8080 por defecto, Render define PORT
+    port = int(os.getenv("PORT", 8080))
     app = web.Application()
     app.add_routes([web.get("/", handle_root)])
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)  # IMPORTANTE: escuchar en 0.0.0.0
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"🌐 Web server running on port {port}")
+    logging.info(f"🌐 Web server running on port {port}")
 
-# --- INICIALIZACIÓN DEL BOT Y WEB SERVER ---
+# --- INICIALIZACIÓN ---
 
-async def main():
+async def init_bot_and_server():
     application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -244,18 +247,19 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(CommandHandler("summary", summary))
 
-    # Corre el bot con run_polling (maneja startup y shutdown)
-    polling_task = asyncio.create_task(application.run_polling())
-    await run_web_server()
+    await asyncio.gather(
+        application.run_polling(),
+        run_web_server()
+    )
 
-    # Espera a que termine el polling (normalmente nunca)
-    await polling_task
-
+# Entry point compatible con Render
 if __name__ == "__main__":
     try:
         import uvloop
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     except ImportError:
         pass
-    asyncio.run(main())
 
+    loop = asyncio.get_event_loop()
+    loop.create_task(init_bot_and_server())
+    loop.run_forever()
