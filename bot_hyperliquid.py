@@ -253,10 +253,9 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(CommandHandler("summary", summary))
 
-    await asyncio.gather(
-        start_bot(application),
-        run_web_server()
-    )
+    asyncio.create_task(start_bot(application))  
+    await run_web_server()                       
+
 
 if __name__ == "__main__":
     try:
