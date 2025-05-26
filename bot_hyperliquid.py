@@ -221,26 +221,17 @@ async def fetch_fills(address: str) -> list:
 
 # --- SERVIDOR HTTP PARA RENDER ---
 
-async def handle_root(request):
-    return web.Response(text="✅ Bot is alive!")
-
 async def run_web_server():
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.getenv("PORT", 8080))  # 8080 por defecto, Render define PORT
     app = web.Application()
     app.add_routes([web.get("/", handle_root)])
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, port=port)  
-    print(f"🌐 Web server running on port {port}")
+    site = web.TCPSite(runner, "0.0.0.0", port)  # IMPORTANTE: escuchar en 0.0.0.0
     await site.start()
+    print(f"🌐 Web server running on port {port}")
 
 # --- INICIALIZACIÓN DEL BOT Y WEB SERVER ---
-
-async def start_bot(application):
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-    print("🤖 Bot polling started")
 
 async def main():
     application = ApplicationBuilder().token(TOKEN).build()
@@ -253,9 +244,12 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(CommandHandler("summary", summary))
 
-    asyncio.create_task(start_bot(application))  
-    await run_web_server()                       
+    # Corre el bot con run_polling (maneja startup y shutdown)
+    polling_task = asyncio.create_task(application.run_polling())
+    await run_web_server()
 
+    # Espera a que termine el polling (normalmente nunca)
+    await polling_task
 
 if __name__ == "__main__":
     try:
@@ -264,3 +258,4 @@ if __name__ == "__main__":
     except ImportError:
         pass
     asyncio.run(main())
+
