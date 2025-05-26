@@ -12,7 +12,7 @@ from aiohttp import web
 # Aplica nest_asyncio para entornos como Render
 nest_asyncio.apply()
 
-# Token del bot (usa variable de entorno en Render)
+# Token del bot desde variable de entorno
 TOKEN = os.getenv("TOKEN")
 
 # Diccionario para guardar direcciones por usuario
@@ -23,11 +23,11 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-# Comando /start
+# --- COMANDOS DE TELEGRAM ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Welcome! Use /add, /list, /remove, /positions or /summary <1h|8h|24h>.")
 
-# Comando /add <address>
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     address = " ".join(context.args)
@@ -37,7 +37,6 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_addresses.setdefault(user_id, []).append(address)
     await update.message.reply_text(f"✅ Address added: {address}")
 
-# Comando /list
 async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     addresses = user_addresses.get(user_id, [])
@@ -46,7 +45,6 @@ async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("📋 Your addresses:\n" + "\n".join(addresses))
 
-# Comando /remove <address>
 async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     address = " ".join(context.args)
@@ -56,7 +54,6 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ Address not found.")
 
-# Comando /positions
 async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     addresses = user_addresses.get(user_id, [])
@@ -68,7 +65,6 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("📌 Select an address to view recent fills summary:", reply_markup=reply_markup)
 
-# Maneja la selección de wallet para /positions
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -79,11 +75,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"⚠️ No recent fills or error for {address}.")
         return
 
-    # Agrupar fills por moneda y dirección (LONG/SHORT)
     summary = {}
     for fill in fills:
         coin = fill.get("coin")
-        direction = fill.get("dir", "").upper()  # "LONG" o "SHORT"
+        direction = fill.get("dir", "").upper()
         size_raw = fill.get("sz", 0)
         price_raw = fill.get("px", 0)
 
@@ -108,9 +103,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"⚠️ No fills to summarize for {address}.")
         return
 
-    # Ordenar por valor en USD descendente y limitar a 5
     sorted_summary = sorted(summary.items(), key=lambda x: x[1]["usd_value"], reverse=True)[:5]
-
     lines = [f"Top fills summary for {address}:"]
     for i, ((direction, coin), data) in enumerate(sorted_summary, 1):
         volume = data["volume"]
@@ -120,29 +113,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = "\n".join(lines)
     await query.edit_message_text(message)
 
-# Función para obtener fills desde la API
-async def fetch_fills(address: str) -> list:
-    url = "https://api.hyperliquid.xyz/info"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "type": "userFills",
-        "user": address,
-        "aggregateByTime": False
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status != 200:
-                    logging.error(f"Error fetching fills for {address}: HTTP {resp.status}")
-                    return []
-                data = await resp.json()
-                return data
-    except Exception as e:
-        logging.error(f"Exception fetching fills for {address}: {e}")
-        return []
-
-# Comando /summary <1h|8h|24h>
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     addresses = user_addresses.get(user_id, [])
@@ -150,24 +120,21 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 No addresses added.")
         return
 
-    # Leer intervalo temporal
     if context.args and context.args[0] in ["1h", "8h", "24h"]:
         hours = int(context.args[0].replace("h", ""))
     else:
-        hours = 24  # Por defecto 24h
+        hours = 24
 
     since_timestamp = datetime.utcnow() - timedelta(hours=hours)
     since_ms = int(since_timestamp.timestamp() * 1000)
 
     coin_summary = {}
 
-    # Consulta fills de todas las wallets
     for address in addresses:
         fills = await fetch_fills(address)
         if not fills:
             continue
 
-        # Filtrar fills recientes y agregar a resumen
         for fill in fills:
             fill_time = fill.get("time", 0)
             if fill_time < since_ms:
@@ -209,13 +176,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ No fills found in the last {hours} hours.")
         return
 
-    # Ordenar por valor en USD descendente y limitar a 10
-    sorted_coins = sorted(
-        coin_summary.items(),
-        key=lambda x: x[1]["total_usd"],
-        reverse=True
-    )[:10]
-
+    sorted_coins = sorted(coin_summary.items(), key=lambda x: x[1]["total_usd"], reverse=True)[:10]
     lines = [f"Most traded coins in the last {hours}h:"]
     for i, (coin, data) in enumerate(sorted_coins, 1):
         total_vol = data["total_volume"]
@@ -230,28 +191,59 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines))
 
+# --- API DE HYPERLIQUID ---
 
-# Servidor HTTP básico para que Render no haga timeout
+async def fetch_fills(address: str) -> list:
+    url = "https://api.hyperliquid.xyz/info"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "type": "userFills",
+        "user": address,
+        "aggregateByTime": False
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status != 200:
+                    logging.error(f"Error fetching fills for {address}: HTTP {resp.status}")
+                    return []
+                data = await resp.json()
+                if isinstance(data, list):
+                    return data
+                elif isinstance(data, dict) and "fills" in data:
+                    return data["fills"]
+                else:
+                    return []
+    except Exception as e:
+        logging.error(f"Exception fetching fills for {address}: {e}")
+        return []
+
+# --- SERVIDOR HTTP PARA RENDER ---
+
 async def handle_root(request):
-    return web.Response(text="Bot is running!")
+    return web.Response(text="✅ Bot is alive!")
 
 async def run_web_server():
-    port = int(os.getenv("PORT", 8080))  # Render asigna dinámicamente este puerto
+    port = int(os.getenv("PORT", 8080))
     app = web.Application()
     app.add_routes([web.get("/", handle_root)])
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=port)
-    print(f"✅ Web server running on port {port}")
+    print(f"🌐 Web server running on port {port}")
     await site.start()
 
+# --- INICIALIZACIÓN DEL BOT Y WEB SERVER ---
+
+async def start_bot(application):
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    print("🤖 Bot polling started")
 
 async def main():
-    application = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .build()
-    )
+    application = ApplicationBuilder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("add", add))
@@ -261,20 +253,15 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(CommandHandler("summary", summary))
 
-    # No permitas que ninguna excepción en el bot o en el servidor cierre el proceso
-    try:
-        await asyncio.gather(
-            run_web_server(),
-            application.run_polling()
-        )
-    except Exception as e:
-        logging.error(f"Error in main: {e}")
-
+    await asyncio.gather(
+        start_bot(application),
+        run_web_server()
+    )
 
 if __name__ == "__main__":
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        pass
     asyncio.run(main())
-
-
-
-
-
