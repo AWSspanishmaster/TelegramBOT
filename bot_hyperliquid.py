@@ -247,6 +247,7 @@ async def run_web_server():
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -257,14 +258,35 @@ async def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
 
-    # Corre bot y servidor web simultáneamente
-    await asyncio.gather(
-        run_web_server(),
-        app.run_polling()
-    )
+    # --- Servidor web con endpoint raíz y webhook para Telegram ---
+    async def telegram_webhook(request):
+        data = await request.json()
+        update = Update.de_json(data, app.bot)
+        await app.process_update(update)
+        return web.Response()
+
+    web_app = web.Application()
+    web_app.add_routes([
+        web.get("/", handle_root),
+        web.post(f"/{TOKEN}", telegram_webhook),
+    ])
+
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    # Establece el webhook
+    webhook_url = f"https://{os.environ['RENDER_EXTERNAL_HOSTNAME']}/{TOKEN}"
+    await app.bot.set_webhook(webhook_url)
+
+    print(f"✅ Bot is running via webhook at {webhook_url}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
