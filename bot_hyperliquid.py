@@ -257,7 +257,7 @@ async def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
 
-    print(f"✅ Bot is running via webhook at {WEBHOOK_URL}")
+    print("✅ Bot is running via webhook at https://telegrambot-d7te.onrender.com/{TOKEN}")
     await app.run_webhook(
         listen="0.0.0.0",
         port=8080,
@@ -267,6 +267,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
