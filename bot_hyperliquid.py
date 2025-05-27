@@ -115,13 +115,11 @@ def get_text(user_id, key):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # Default lang to English if not set
     if user_id not in user_languages:
         user_languages[user_id] = "en"
     await update.message.reply_text(get_text(user_id, "start"), reply_markup=language_keyboard(user_id))
 
 def language_keyboard(user_id):
-    lang = user_languages.get(user_id, "en")
     buttons = [
         InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
         InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es"),
@@ -177,11 +175,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     addresses = user_addresses.get(user_id, {})
-    lang = user_languages.get(user_id, "en")
     if not addresses:
         await update.message.reply_text(get_text(user_id, "no_addresses"))
     else:
-        # Mejor formato visual con emojis y alineación
         lines = [f"• {name}: `{addr}`" for addr, name in addresses.items()]
         text = f"{get_text(user_id, 'your_addresses')}\n\n" + "\n".join(lines)
         await update.message.reply_text(text, parse_mode="Markdown")
@@ -189,7 +185,6 @@ async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     address = " ".join(context.args)
-    lang = user_languages.get(user_id, "en")
     if address in user_addresses.get(user_id, {}):
         del user_addresses[user_id][address]
         await update.message.reply_text(get_text(user_id, "address_removed").format(address))
@@ -199,156 +194,171 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     addresses = user_addresses.get(user_id, {})
-    lang = user_languages.get(user_id, "en")
     if not addresses:
         await update.message.reply_text(get_text(user_id, "no_addresses"))
         return
 
-    # Botones para elegir dirección + botón editar alias + botón cambio idioma
     keyboard = [
         [InlineKeyboardButton(f"{name}", callback_data=f"pos_{addr}")]
         for addr, name in addresses.items()
     ]
-    keyboard.append([
-        InlineKeyboardButton("✏️ Edit Nicknames", callback_data="edit_nicknames"),
-        InlineKeyboardButton("🌐 Language", callback_data="change_language"),
-    ])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(get_text(user_id, "select_address_fills"), reply_markup=reply_markup)
+    keyboard.append([InlineKeyboardButton(get_text(user_id, "choose_language"), callback_data="change_lang")])
+    await update.message.reply_text(get_text(user_id, "select_address_fills"),
+                                    reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     data = query.data
-    lang = user_languages.get(user_id, "en")
-
-    # Manejo de selección de posiciones de wallets
     if data.startswith("pos_"):
         address = data[4:]
-        name = user_addresses.get(user_id, {}).get(address, address)
-        # Aquí iría la lógica para traer fills o posiciones
-        # Solo mockup visual con emojis y mejor formato
-        text = f"📊 {get_text(user_id, 'recent_fills_for').format(name)}\n\n" \
-               f"🔹 Example position 1\n🔹 Example position 2"
-        await query.edit_message_text(text)
-
-    elif data == "edit_nicknames":
-        addresses = user_addresses.get(user_id, {})
-        if not addresses:
-            await query.edit_message_text(get_text(user_id, "no_addresses_edit"))
-            return
-        keyboard = [
-            [InlineKeyboardButton(f"{name}", callback_data=f"editnick_{addr}")]
-            for addr, name in addresses.items()
+        # Aquí simular una consulta de fills recientes (deberías sustituir por llamada real)
+        fills = [
+            {"time": "2025-05-27 12:00", "coin": "BTC", "side": "Long", "qty": 0.1, "price": 30000},
+            {"time": "2025-05-27 13:00", "coin": "ETH", "side": "Short", "qty": 2, "price": 2000},
         ]
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_positions")])
-        await query.edit_message_text("✏️ Select nickname to edit:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-    elif data.startswith("editnick_"):
-        address = data[len("editnick_") :]
-        user_states[user_id] = {"stage": "editing_nickname", "address": address}
-        await query.edit_message_text(get_text(user_id, "edit_nickname_prompt").format(address))
+        if not fills:
+            await query.edit_message_text(get_text(user_id, "no_fills").format(address))
+            return
+        text = f"{get_text(user_id, 'recent_fills_for').format(address)}\n\n"
+        for f in fills:
+            line = f"{f['time']} - {f['coin']} - {f['side']} - Qty: {f['qty']} at ${f['price']}"
+            text += line + "\n"
+        # Añadimos botón para cambiar idioma y volver
+        buttons = [
+            [
+                InlineKeyboardButton(get_text(user_id, "choose_language"), callback_data="change_lang"),
+                InlineKeyboardButton("⬅️ Back", callback_data="back_positions"),
+            ]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data == "back_positions":
-        # Volver al listado de posiciones
         await positions(update, context)
 
-    elif data == "change_language":
-        await query.edit_message_text(get_text(user_id, "choose_language"), reply_markup=language_keyboard(user_id))
-
-    elif data == "refresh_summary":
-        # Recalcular resumen con parámetros previos guardados (mock)
-        # Suponemos que tenemos user_states[user_id]["last_summary_period"] guardado
-        period = user_states.get(user_id, {}).get("last_summary_period", "24h")
-        await send_summary(update, context, period, refresh=True)
-
-async def edit_nickname_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-    state = user_states.get(user_id)
-    if not state or state.get("stage") != "editing_nickname":
-        return
-    address = state["address"]
-    user_addresses[user_id][address] = text
-    await update.message.reply_text(get_text(user_id, "nickname_updated"))
-    del user_states[user_id]
+    elif data == "change_lang":
+        await language_button_handler(update, context)
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    lang = user_languages.get(user_id, "en")
-
+    # Mostrar botones para intervalos
     buttons = [
-        [
-            InlineKeyboardButton("1h", callback_data="summary_1h"),
-            InlineKeyboardButton("6h", callback_data="summary_6h"),
-            InlineKeyboardButton("12h", callback_data="summary_12h"),
-            InlineKeyboardButton("24h", callback_data="summary_24h"),
-        ],
-        [
-            InlineKeyboardButton(get_text(user_id, "refresh_button"), callback_data="refresh_summary"),
-            InlineKeyboardButton("🌐", callback_data="change_language"),
-        ],
+        [InlineKeyboardButton("1h", callback_data="sum_1h"),
+         InlineKeyboardButton("6h", callback_data="sum_6h")],
+        [InlineKeyboardButton("12h", callback_data="sum_12h"),
+         InlineKeyboardButton("24h", callback_data="sum_24h")],
+        [InlineKeyboardButton(get_text(user_id, "choose_language"), callback_data="change_lang")],
     ]
-    reply_markup = InlineKeyboardMarkup(buttons)
-    await update.message.reply_text(get_text(user_id, "select_timeframe"), reply_markup=reply_markup)
+    await update.message.reply_text(get_text(user_id, "select_timeframe"),
+                                    reply_markup=InlineKeyboardMarkup(buttons))
 
-async def send_summary(update: Update, context: ContextTypes.DEFAULT_TYPE, period: str, refresh=False):
-    # Actualizar user_states para guardar último periodo
-    user_id = update.effective_user.id
-    user_states.setdefault(user_id, {})["last_summary_period"] = period
-    lang = user_languages.get(user_id, "en")
-
-    # Simulación de datos de resumen con emojis y formato bonito
-    summary_text = f"📊 {get_text(user_id, 'most_traded').format(period)}\n\n"
-    summary_text += "🔹 BTC: 150 trades\n🔹 ETH: 120 trades\n🔹 USDT: 90 trades\n\n"
-    summary_text += f"⚖️ {get_text(user_id, 'long_vs_short').format(60, 40, 5)}"
-
-    if refresh:
-        # Si es refresh, editamos el mensaje actual
-        await update.callback_query.edit_message_text(summary_text, reply_markup=update.callback_query.message.reply_markup)
-    else:
-        await update.message.reply_text(summary_text, reply_markup=language_keyboard(user_id))
-
-async def summary_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     data = query.data
 
-    if data.startswith("summary_"):
-        period = data.split("_")[1]
-        await send_summary(update, context, period)
+    if data.startswith("sum_"):
+        period = data[4:]
+        # Aquí simular resumen, reemplazar con consulta real
+        text = f"{get_text(user_id, 'most_traded').format(period)}\n"
+        # Datos simulados
+        coins = [("BTC", 10), ("ETH", 7), ("SOL", 5)]
+        for coin, vol in coins:
+            text += f"• {coin}: {vol} trades\n"
 
-async def main():
-    app = Application.builder().token(TOKEN).build()
+        # Botón refrescar y cambio idioma + volver
+        buttons = [
+            [
+                InlineKeyboardButton(get_text(user_id, "refresh_button"), callback_data=data),
+                InlineKeyboardButton("⬅️ Back", callback_data="summary_back"),
+            ],
+            [InlineKeyboardButton(get_text(user_id, "choose_language"), callback_data="change_lang")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add", add))
-    app.add_handler(CommandHandler("list", list_addresses))
-    app.add_handler(CommandHandler("remove", remove))
-    app.add_handler(CommandHandler("positions", positions))
-    app.add_handler(CommandHandler("summary", summary))
+    elif data == "summary_back":
+        # Volver a menú resumen
+        await summary(update, context)
 
-    app.add_handler(CallbackQueryHandler(language_button_handler, pattern=r"^lang_"))
-    app.add_handler(CallbackQueryHandler(button_handler, pattern=r"^(pos_|edit_nick|back_positions|change_language|refresh_summary)"))
-    app.add_handler(CallbackQueryHandler(summary_button_handler, pattern=r"^summary_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, edit_nickname_receive))
+    elif data == "change_lang":
+        await language_button_handler(update, context)
 
-    # aiohttp web server para mantener vivo el bot en Render
+async def edit_nickname(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    addresses = user_addresses.get(user_id, {})
+    if not addresses:
+        await update.message.reply_text(get_text(user_id, "no_addresses_edit"))
+        return
+
+    buttons = [[InlineKeyboardButton(name, callback_data=f"editnick_{addr}")] for addr, name in addresses.items()]
+    buttons.append([InlineKeyboardButton(get_text(user_id, "choose_language"), callback_data="change_lang")])
+    await update.message.reply_text("✏️ Select address to edit nickname:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def edit_nickname_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    data = query.data
+    if data.startswith("editnick_"):
+        address = data[9:]
+        user_states[user_id] = {"stage": "awaiting_new_nickname", "address": address}
+        await query.edit_message_text(get_text(user_id, "edit_nickname_prompt").format(address))
+
+async def handle_new_nickname(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in user_states or user_states[user_id].get("stage") != "awaiting_new_nickname":
+        return
+    new_nick = update.message.text.strip()
+    address = user_states[user_id]["address"]
+    if user_id in user_addresses and address in user_addresses[user_id]:
+        user_addresses[user_id][address] = new_nick
+        await update.message.reply_text(get_text(user_id, "nickname_updated"))
+    else:
+        await update.message.reply_text(get_text(user_id, "address_not_found"))
+    del user_states[user_id]
+
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❓ Unknown command")
+
+async def run_webhook_server():
     async def handle(request):
         return web.Response(text="Bot is running")
 
-    runner = web.AppRunner(web.Application())
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", "8080")))
     await site.start()
 
-    await app.run_polling()
+async def main():
+    application = Application.builder().token(TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("add", add))
+    application.add_handler(CommandHandler("list", list_addresses))
+    application.add_handler(CommandHandler("remove", remove))
+    application.add_handler(CommandHandler("positions", positions))
+    application.add_handler(CommandHandler("summary", summary))
+    application.add_handler(CommandHandler("editnickname", edit_nickname))
+
+    application.add_handler(CallbackQueryHandler(language_button_handler, pattern="^lang_"))
+    application.add_handler(CallbackQueryHandler(positions_callback, pattern="^(pos_|back_positions|change_lang)$"))
+    application.add_handler(CallbackQueryHandler(summary_callback, pattern="^(sum_|summary_back|change_lang)$"))
+    application.add_handler(CallbackQueryHandler(edit_nickname_callback, pattern="^editnick_"))
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_new_nickname))
+
+    # Run web server alongside bot polling
+    runner = asyncio.create_task(run_webhook_server())
+    await application.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
