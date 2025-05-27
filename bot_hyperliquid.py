@@ -249,7 +249,12 @@ async def main():
     app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))
     app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
 
-    # Servidor aiohttp para evitar timeout
+    # Inicia bot manualmente
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    # Servidor aiohttp para mantener Render vivo
     runner = web.AppRunner(web.Application())
     app.web_app = runner.app
     app.web_app.add_routes([web.get("/", handle_root)])
@@ -259,7 +264,10 @@ async def main():
     await site.start()
 
     print("✅ Bot is running via polling on Render with aiohttp keep-alive")
-    await app.run_polling()
+
+    # Espera indefinida
+    await asyncio.Event().wait()
+
 
 # Lanza el bot
 async def safe_main():
