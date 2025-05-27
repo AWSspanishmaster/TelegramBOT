@@ -1,5 +1,3 @@
-Aparentemente funciona perfecto, guarda esta versión como VERSIÓN OK:
-
 import os
 import logging
 import aiohttp
