@@ -30,11 +30,40 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-# Comando /start
+# Comando /start con menú inline
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Welcome! Use /add, /list, /remove, /positions, or /summary."
-    )
+    keyboard = [
+        [InlineKeyboardButton("➕ Add", callback_data="menu_add")],
+        [InlineKeyboardButton("📋 List", callback_data="menu_list")],
+        [InlineKeyboardButton("📌 Positions", callback_data="menu_positions")],
+        [InlineKeyboardButton("📊 Summary", callback_data="menu_summary")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.message:
+        await update.message.reply_text(
+            "Welcome! Please choose an option:", reply_markup=reply_markup
+        )
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(
+            "Welcome! Please choose an option:", reply_markup=reply_markup
+        )
+
+# Botón "Add" desde menú
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "menu_add":
+        user_id = query.from_user.id
+        user_states[user_id] = {"stage": "awaiting_address"}
+        await query.edit_message_text("✍️ Write the address")
+    elif query.data == "menu_list":
+        await list_addresses(update, context, from_button=True)
+    elif query.data == "menu_positions":
+        await positions(update, context, from_button=True)
+    elif query.data == "menu_summary":
+        await summary(update, context, from_button=True)
 
 # Comando /add inicia flujo de dirección
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,14 +101,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del user_states[user_id]
 
 # Comando /list
-async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
+    user_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
     addresses = user_addresses.get(user_id, {})
     if not addresses:
-        await update.message.reply_text("📭 No addresses added.")
+        msg = "📭 No addresses added."
     else:
         lines = [f"{name}: {addr}" for addr, name in addresses.items()]
-        await update.message.reply_text("📋 Your addresses:\n" + "\n".join(lines))
+        msg = "📋 Your addresses:\n" + "\n".join(lines)
+
+    if from_button:
+        await update.callback_query.edit_message_text(msg)
+    else:
+        await update.message.reply_text(msg)
 
 # Comando /remove <address>
 async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,16 +126,24 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Address not found.")
 
 # Comando /positions
-async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
+    user_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
     addresses = user_addresses.get(user_id, {})
     if not addresses:
-        await update.message.reply_text("📭 No addresses added.")
+        msg = "📭 No addresses added."
+        if from_button:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return
 
     keyboard = [[InlineKeyboardButton(f"{name}", callback_data=addr)] for addr, name in addresses.items()]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("📌 Select an address to view recent fills:", reply_markup=reply_markup)
+
+    if from_button:
+        await update.callback_query.edit_message_text("📌 Select an address to view recent fills:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("📌 Select an address to view recent fills:", reply_markup=reply_markup)
 
 # Maneja el botón con dirección seleccionada
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -149,7 +191,7 @@ async def fetch_fills(address: str):
         return None
 
 # Comando /summary muestra botones
-async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     keyboard = [
         [InlineKeyboardButton("1h", callback_data="summary_1h"),
          InlineKeyboardButton("6h", callback_data="summary_6h")],
@@ -157,7 +199,11 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("24h", callback_data="summary_24h")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("⏱️ Select timeframe:", reply_markup=reply_markup)
+
+    if from_button:
+        await update.callback_query.edit_message_text("⏱️ Select timeframe:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("⏱️ Select timeframe:", reply_markup=reply_markup)
 
 # Maneja botones de resumen
 async def summary_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -248,6 +294,7 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))
     app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))
 
     # Inicia bot manualmente
     await app.initialize()
@@ -263,25 +310,9 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-    print("✅ Bot is running via polling on Render with aiohttp keep-alive")
-
-    # Espera indefinida
+    print("✅ Bot is running...")
     await asyncio.Event().wait()
 
-
-# Lanza el bot
-async def safe_main():
-    try:
-        await main()
-    except Exception as e:
-        print(f"❌ Error in main(): {e}")
-
 if __name__ == "__main__":
-    try:
-        asyncio.run(safe_main())
-    except RuntimeError as e:
-        if "Cannot close a running event loop" in str(e):
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(safe_main())
-        else:
-            raise
+    asyncio.run(main())
+
