@@ -30,6 +30,53 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
+# Diccionario para almacenar operaciones ya notificadas (por wallet)
+notified_fills = {}
+
+async def monitor_new_fills(application: Application):
+    while True:
+        try:
+            for user_id, addresses in user_addresses.items():
+                for address in addresses:
+                    fills = await fetch_fills(address)
+                    if not fills:
+                        continue
+
+                    # Obtén el set de IDs de fills ya notificados para esta wallet
+                    seen = notified_fills.setdefault(address, set())
+
+                    new_fills = []
+                    for fill in fills:
+                        fill_id = fill.get("id") or str(fill)  # Usa ID si existe, sino string fill
+                        if fill_id not in seen:
+                            new_fills.append(fill)
+                            seen.add(fill_id)
+
+                    if new_fills:
+                        # Envía mensaje por cada fill nuevo al usuario
+                        for f in new_fills:
+                            coin = f.get("coin", "?")
+                            size = f.get("sz", "?")
+                            price = f.get("px", "?")
+                            direction = f.get("dir", "?")
+                            timestamp = int(f.get("time", 0)) // 1000
+                            time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+                            msg = (
+                                f"🚨 New operation detected!\n"
+                                f"Wallet: {address}\n"
+                                f"Coin: {coin} | Direction: {direction}\n"
+                                f"Size: {size} @ ${price}\n"
+                                f"Time: {time_str}"
+                            )
+                            try:
+                                await application.bot.send_message(chat_id=user_id, text=msg)
+                            except Exception as e:
+                                logging.error(f"Error sending notification to {user_id}: {e}")
+        except Exception as e:
+            logging.error(f"Error in monitor_new_fills loop: {e}")
+
+        await asyncio.sleep(60)  # Espera 60 segundos antes de consultar de nuevo
+
 # Comando /start con menú inline
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -300,6 +347,7 @@ async def main():
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
+    asyncio.create_task(monitor_new_fills(app))
 
     # Servidor aiohttp para mantener Render vivo
     runner = web.AppRunner(web.Application())
