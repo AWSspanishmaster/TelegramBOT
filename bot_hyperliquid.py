@@ -1,7 +1,3 @@
-Voy a ser muy concreto:
-
-quiero que cojas el siguiente código y SIN MODIFICAR NADA añadas la función necesaria para que el bot me mande mensajes cada vez que una de las wallets registrada en /list realice una operacion
-
 import os
 import logging
 import aiohttp
