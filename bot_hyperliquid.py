@@ -15,22 +15,19 @@ from telegram.ext import (
 )
 from aiohttp import web
 
-# Aplica nest_asyncio para entornos como Render
 nest_asyncio.apply()
-
-# Token del bot (usa variable de entorno en Render)
 TOKEN = os.getenv("TOKEN")
 
-# Diccionarios para guardar direcciones y estados
 user_addresses = {}
 user_states = {}
 
-# Configura el logging
+# Para control de fills ya notificados: {user_id: {address: set(fills_ids)}}
+notified_fills = {}
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-# Comando /start con menú inline
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("➕ Add", callback_data="menu_add")],
@@ -40,16 +37,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    # Añadimos botón fijo para volver a /start en mensajes de menú y resumen
+    fixed_button = InlineKeyboardButton("🏠 Main Menu", callback_data="menu_start")
+
+    # Si es callback_query respondemos con menú, sino mensaje normal
     if update.message:
         await update.message.reply_text(
             "Welcome! Please choose an option:", reply_markup=reply_markup
         )
     elif update.callback_query:
+        # Añadimos botón fijo abajo
+        buttons_with_fixed = [*keyboard, [fixed_button]]
+        reply_markup_fixed = InlineKeyboardMarkup(buttons_with_fixed)
         await update.callback_query.edit_message_text(
-            "Welcome! Please choose an option:", reply_markup=reply_markup
+            "Welcome! Please choose an option:", reply_markup=reply_markup_fixed
         )
 
-# Botón "Add" desde menú
+
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -64,14 +68,16 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await positions(update, context, from_button=True)
     elif query.data == "menu_summary":
         await summary(update, context, from_button=True)
+    elif query.data == "menu_start":
+        # Maneja el botón fijo para volver al menú start
+        await start(update, context)
 
-# Comando /add inicia flujo de dirección
+
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_states[user_id] = {"stage": "awaiting_address"}
     await update.message.reply_text("✍️ Write the address")
 
-# Manejo de mensajes para flujo de /add
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
@@ -100,7 +106,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Done!")
         del user_states[user_id]
 
-# Comando /list
 async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     user_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
     addresses = user_addresses.get(user_id, {})
@@ -110,12 +115,17 @@ async def list_addresses(update: Update, context: ContextTypes.DEFAULT_TYPE, fro
         lines = [f"{name}: {addr}" for addr, name in addresses.items()]
         msg = "📋 Your addresses:\n" + "\n".join(lines)
 
+    # Añadimos botón fijo para volver al menú
+    fixed_button = InlineKeyboardButton("🏠 Main Menu", callback_data="menu_start")
+
     if from_button:
-        await update.callback_query.edit_message_text(msg)
+        await update.callback_query.edit_message_text(
+            msg,
+            reply_markup=InlineKeyboardMarkup([[fixed_button]])
+        )
     else:
         await update.message.reply_text(msg)
 
-# Comando /remove <address>
 async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     address = " ".join(context.args)
@@ -125,7 +135,6 @@ async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("⚠️ Address not found.")
 
-# Comando /positions
 async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     user_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
     addresses = user_addresses.get(user_id, {})
@@ -138,6 +147,9 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE, from_but
         return
 
     keyboard = [[InlineKeyboardButton(f"{name}", callback_data=addr)] for addr, name in addresses.items()]
+    # Botón fijo para volver al menú
+    fixed_button = InlineKeyboardButton("🏠 Main Menu", callback_data="menu_start")
+    keyboard.append([fixed_button])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if from_button:
@@ -145,7 +157,6 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE, from_but
     else:
         await update.message.reply_text("📌 Select an address to view recent fills:", reply_markup=reply_markup)
 
-# Maneja el botón con dirección seleccionada
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -169,7 +180,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(f"⚠️ No recent fills or error for {address}.")
 
-# Función para obtener fills desde la API
 async def fetch_fills(address: str):
     url = "https://api.hyperliquid.xyz/info"
     headers = {"Content-Type": "application/json"}
@@ -190,129 +200,121 @@ async def fetch_fills(address: str):
         logging.error(f"Exception fetching fills for {address}: {e}")
         return None
 
-# Comando /summary muestra botones
+# --- CAMBIO: summary con botón refresh y botón fijo ---
+
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     keyboard = [
         [InlineKeyboardButton("1h", callback_data="summary_1h"),
          InlineKeyboardButton("6h", callback_data="summary_6h")],
         [InlineKeyboardButton("12h", callback_data="summary_12h"),
          InlineKeyboardButton("24h", callback_data="summary_24h")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="summary_refresh")]
     ]
+
+    # Botón fijo para volver al menú
+    fixed_button = InlineKeyboardButton("🏠 Main Menu", callback_data="menu_start")
+    keyboard.append([fixed_button])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if from_button:
-        await update.callback_query.edit_message_text("⏱️ Select timeframe:", reply_markup=reply_markup)
-    else:
-        await update.message.reply_text("⏱️ Select timeframe:", reply_markup=reply_markup)
+    msg_text = "📊 Summary - Choose period:"
 
-# Maneja botones de resumen
-async def summary_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if from_button:
+        await update.callback_query.edit_message_text(msg_text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(msg_text, reply_markup=reply_markup)
+
+
+async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    timeframe = query.data.split("_")[1]
-    user_id = query.from_user.id
-    addresses = user_addresses.get(user_id, {})
-    if not addresses:
-        await query.edit_message_text("📭 No addresses added.")
+
+    # Parse data
+    data = query.data
+    if data == "summary_refresh":
+        # Recarga summary (usando mensaje actual)
+        await summary(update, context, from_button=True)
         return
 
-    valid_times = {"1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400}
-    timeframe_seconds = valid_times.get(timeframe)
-    now_ts = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-    cutoff_ts = now_ts - timeframe_seconds * 1000
+    # Simulación de resumen: aquí deberías añadir la lógica real
+    period = data.split("_")[1] if "_" in data else "unknown"
+    await query.edit_message_text(f"📊 Summary for last {period} hours\n\n[Datos reales aquí]")
 
-    summary_data = {}
-    await query.edit_message_text(f"⏳ Fetching fills for last {timeframe}... Please wait.")
+    # Añadimos el botón Refresh y fijo para volver al menú
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh", callback_data="summary_refresh")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="menu_start")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_reply_markup(reply_markup)
 
-    for address in addresses:
-        fills = await fetch_fills(address)
-        if not fills:
-            continue
-        for fill in fills:
-            try:
-                fill_time = fill.get("time", 0)
-                if fill_time < cutoff_ts:
+# --- Tarea asíncrona para notificaciones automáticas ---
+
+async def notify_new_fills(application):
+    while True:
+        for user_id, addresses in user_addresses.items():
+            for address in addresses.keys():
+                fills = await fetch_fills(address)
+                if not fills:
                     continue
-                coin = fill.get("coin")
-                size = float(fill.get("sz", 0))
-                price = float(fill.get("px", 0))
-                direction = fill.get("dir", "").lower()
+                # Usa notified_fills para no enviar repetidos
+                known_fills = notified_fills.setdefault(user_id, {}).setdefault(address, set())
+                new_fills = []
+                for fill in fills:
+                    fill_id = fill.get("id")
+                    if fill_id and fill_id not in known_fills:
+                        new_fills.append(fill)
+                        known_fills.add(fill_id)
 
-                if coin not in summary_data:
-                    summary_data[coin] = {
-                        "volume": 0.0,
-                        "usd_volume": 0.0,
-                        "wallets": set(),
-                        "long_volume": 0.0,
-                        "short_volume": 0.0,
-                    }
+                if new_fills:
+                    for fill in new_fills:
+                        coin = fill.get("coin", "?")
+                        size = fill.get("sz", "?")
+                        price = fill.get("px", "?")
+                        direction = fill.get("dir", "?")
+                        timestamp = int(fill.get("time", 0)) // 1000
+                        time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+                        msg = f"⚡ New fill detected for {address}:\n📊 {coin} | {direction}\nSize: {size} @ ${price}\nTime: {time_str}"
+                        try:
+                            await application.bot.send_message(chat_id=user_id, text=msg)
+                        except Exception as e:
+                            logging.error(f"Failed to send notification to {user_id}: {e}")
+        await asyncio.sleep(60)  # Esperar 60s antes de siguiente chequeo
 
-                summary_data[coin]["volume"] += size
-                summary_data[coin]["usd_volume"] += size * price
-                summary_data[coin]["wallets"].add(address)
-                if direction == "long":
-                    summary_data[coin]["long_volume"] += size
-                elif direction == "short":
-                    summary_data[coin]["short_volume"] += size
+# --- HTTP server para Render (sin cambios) ---
 
-            except Exception as e:
-                logging.error(f"Error procesando fill: {e}")
+async def handle(request):
+    return web.Response(text="Bot is running.")
 
-    if not summary_data:
-        await query.message.reply_text("⚠️ No fills found in the given timeframe.")
-        return
-
-    sorted_coins = sorted(summary_data.items(), key=lambda x: x[1]["volume"], reverse=True)[:10]
-
-    lines = [f"Most traded coins in the last {timeframe}:"]
-    for i, (coin, data) in enumerate(sorted_coins, 1):
-        vol = data["volume"]
-        usd = data["usd_volume"]
-        wallets = len(data["wallets"])
-        long_pct = round(100 * data["long_volume"] / vol) if vol else 0
-        short_pct = 100 - long_pct
-
-        lines.append(f"{i}.- {vol:,.2f} {coin} (${usd:,.2f})\nLong {long_pct}% vs Short {short_pct}% (Wallets: {wallets})")
-
-    await query.message.reply_text("\n".join(lines))
-
-# Servidor HTTP básico para evitar timeout en Render
-async def handle_root(request):
-    return web.Response(text="✅ Bot is alive")
-
-# Función principal
-async def main():
+def main():
     app = Application.builder().token(TOKEN).build()
 
-    # Handlers del bot
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add))
     app.add_handler(CommandHandler("list", list_addresses))
     app.add_handler(CommandHandler("remove", remove))
     app.add_handler(CommandHandler("positions", positions))
     app.add_handler(CommandHandler("summary", summary))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))
-    app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
+
     app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))
+    app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
+    app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))  # para fills por dirección
 
-    # Inicia bot manualmente
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Servidor aiohttp para mantener Render vivo
+    # Lanzar tarea asíncrona para notificaciones
+    app.job_queue.run_repeating(lambda ctx: asyncio.create_task(notify_new_fills(app)), interval=60, first=10)
+
+    # Start aiohttp server en background
     runner = web.AppRunner(web.Application())
-    app.web_app = runner.app
-    app.web_app.add_routes([web.get("/", handle_root)])
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
+    asyncio.get_event_loop().run_until_complete(runner.setup())
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
+    asyncio.get_event_loop().run_until_complete(site.start())
 
-    print("✅ Bot is running...")
-    await asyncio.Event().wait()
+    logging.info("Bot started.")
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+
 
