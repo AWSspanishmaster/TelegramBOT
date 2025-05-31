@@ -342,14 +342,12 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data.startswith("summary_"):
-        # Extraemos las horas del callback
         try:
             period_hours = int(data.split("_")[1].replace("h", ""))
         except:
             period_hours = 24
 
         text = await generate_summary(addresses, period_hours)
-        # Añadimos botón refresh para el mismo periodo
         keyboard = [
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data=data),
@@ -357,7 +355,7 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
     elif data == "summary_back":
         keyboard = [
@@ -370,6 +368,7 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("📊 Select timeframe for summary:", reply_markup=reply_markup)
+
 
 # Servidor HTTP básico para evitar timeout en Render
 async def handle_root(request):
