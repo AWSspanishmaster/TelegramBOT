@@ -11,7 +11,7 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters,
+    Filters,
     ContextTypes,
 )
 from aiohttp import web
@@ -187,6 +187,7 @@ async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE, from_but
     else:
         await update.message.reply_text("📌 Select an address to view recent fills:", reply_markup=reply_markup)
 
+
 # Maneja el botón con dirección seleccionada
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -194,22 +195,49 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     address = query.data
     fills = await fetch_fills(address)
 
-    if fills:
-        await query.edit_message_text(f"📈 Recent fills for {address}:")
-        for f in fills[:5]:
-            try:
-                coin = f.get("coin", "?")
-                size = f.get("sz", "?")
-                price = f.get("px", "?")
-                direction = f.get("dir", "?")
-                timestamp = int(f.get("time", 0)) // 1000
-                time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
-                msg = f"📊 {coin} | {direction}\nSize: {size} @ ${price}\nTime: {time_str}"
-                await query.message.reply_text(msg)
-            except Exception as e:
-                logging.error(f"Error formatting fill: {e}")
-    else:
+    if not fills:
         await query.edit_message_text(f"⚠️ No recent fills or error for {address}.")
+        return
+
+    # Agrupar por activo y dirección
+    coin_summary = defaultdict(lambda: {"long": 0.0, "short": 0.0, "usd": 0.0})
+
+    for f in fills:
+        try:
+            coin = f.get("coin")
+            sz = float(f.get("sz", 0))
+            px = float(f.get("px", 0))
+            dir = f.get("dir")
+            if not coin or not dir:
+                continue
+
+            usd = sz * px
+            if dir == "L":
+                coin_summary[coin]["long"] += sz
+            elif dir == "S":
+                coin_summary[coin]["short"] += sz
+
+            coin_summary[coin]["usd"] += usd
+        except Exception as e:
+            logging.error(f"Error parsing fill for {address}: {e}")
+
+    if not coin_summary:
+        await query.edit_message_text(f"⚠️ No valid fills for {address}.")
+        return
+
+    lines = [f"📍 Address: `{address}`"]
+    for coin, data in coin_summary.items():
+        total = data["long"] + data["short"]
+        lines.append(
+            f"\n🔹 *{coin}*"
+            f"\n🟢 LONG: `{data['long']:,.2f}`"
+            f"\n🔴 SHORT: `{data['short']:,.2f}`"
+            f"\n💰 USD total: `${data['usd']:,.2f}`"
+        )
+
+    text = "\n".join(lines)
+    await query.edit_message_text(text, parse_mode="Markdown")
+
 
 # Función para obtener fills desde la API
 async def fetch_fills(address: str):
@@ -232,9 +260,8 @@ async def fetch_fills(address: str):
         logging.error(f"Exception fetching fills for {address}: {e}")
         return None
 
-from collections import defaultdict
 
-# Comando /summary con botones de timeframe
+# Comando /summary
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     keyboard = [
         [InlineKeyboardButton("1h", callback_data="summary_1h"),
@@ -243,30 +270,27 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE, from_butto
          InlineKeyboardButton("24h", callback_data="summary_24h")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
     if from_button:
         await update.callback_query.edit_message_text("⏱️ Select timeframe:", reply_markup=reply_markup)
     else:
         await update.message.reply_text("⏱️ Select timeframe:", reply_markup=reply_markup)
 
-# Handler para los botones de resumen
+# Handler para botones de resumen
 async def summary_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     timeframe = query.data.split("_")[1]
     user_id = query.from_user.id
-    addresses = user_addresses.get(user_id, {})
-
-    if not addresses:
-        await query.edit_message_text("📭 No addresses added.")
-        return
 
     await query.edit_message_text(f"⏳ Fetching fills for last {timeframe}... Please wait.")
     summary_text = await generate_summary(user_id, timeframe)
-    await query.message.reply_text(summary_text)
 
-# Lógica central de generación de resumen
+    refresh_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"summary_{timeframe}")]
+    ])
+    await query.edit_message_text(summary_text, reply_markup=refresh_keyboard)
+
+# Función para generar resumen de fills
 async def generate_summary(user_id: int, timeframe: str):
     addresses = user_addresses.get(user_id, {})
     valid_times = {"1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400}
@@ -275,10 +299,8 @@ async def generate_summary(user_id: int, timeframe: str):
     cutoff_ts = now_ts - timeframe_seconds * 1000
 
     coin_data = defaultdict(lambda: {
-        "long_wallets": set(),
-        "short_wallets": set(),
-        "long_usd": 0.0,
-        "short_usd": 0.0
+        "long_wallets": set(), "short_wallets": set(),
+        "long_usd": 0.0, "short_usd": 0.0
     })
 
     for addr, name in addresses.items():
@@ -287,13 +309,16 @@ async def generate_summary(user_id: int, timeframe: str):
             continue
 
         for fill in fills:
-            if fill["time"] < cutoff_ts:
+            if fill.get("time", 0) < cutoff_ts:
                 continue
-            coin = fill["coin"]
-            sz = float(fill["sz"])
-            px = float(fill["px"])
+            coin = fill.get("coin")
+            sz = float(fill.get("sz", 0))
+            px = float(fill.get("px", 0))
             usd = sz * px
-            side = fill["dir"]
+            side = fill.get("dir")
+
+            if not coin or not side:
+                continue
 
             if side == "L":
                 coin_data[coin]["long_wallets"].add(addr)
@@ -307,16 +332,13 @@ async def generate_summary(user_id: int, timeframe: str):
     lines = [f"📊 Most traded coins in the last {timeframe}:"]
     for i, (coin, data) in enumerate(ordered, start=1):
         total_usd = data["long_usd"] + data["short_usd"]
-        total_wallets = len(data["long_wallets"] | data["short_wallets"])
-        if total_wallets == 0:
-            continue
-        long_pct = (len(data["long_wallets"]) / total_wallets) * 100
+        wallet_count = len(data["long_wallets"] | data["short_wallets"])
+        long_pct = (data["long_usd"] / total_usd * 100) if total_usd else 0
         short_pct = 100 - long_pct
+        lines.append(f"{i}.- {coin}: ${total_usd:,.2f}")
+        lines.append(f"🟢 Long: {long_pct:.0f}% 🔴 Short: {short_pct:.0f}% 👛 Wallets: {wallet_count}\n")
 
-        lines.append(f"{i}.- {total_usd:,.2f} USD in {coin}")
-        lines.append(f"📈 Long {long_pct:.0f}% vs 📉 Short {short_pct:.0f}% (Wallets: {total_wallets})")
-
-    return "\n".join(lines) if len(lines) > 1 else "⚠️ No operations in timeframe."
+    return "\n".join(lines) if lines else "⚠️ No operations in timeframe."
 
 # Servidor HTTP básico para evitar timeout en Render
 async def handle_root(request):
