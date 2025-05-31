@@ -226,23 +226,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = []
-for coin, data in summary_data.items():
-    long_usd = data["long_usd"]
-    short_usd = data["short_usd"]
-    total_usd = long_usd + short_usd
-    long_vol = data.get("long_volume", 0)
-    short_vol = data.get("short_volume", 0)
+for coin, data in coin_summary.items():
+    long_vol = data["long"]
+    short_vol = data["short"]
+    usd_total = data["usd"]
 
     lines.append(
         f"🪙 {coin}\n"
-        f"🟢 LONG: {long_vol:.2f} (USD: ${long_usd:,.2f})\n"
-        f"🔴 SHORT: {short_vol:.2f} (USD: ${short_usd:,.2f})\n"
-        f"💰 USD total: ${total_usd:,.2f}\n"
+        f"🟢 LONG: {long_vol:.2f}\n"
+        f"🔴 SHORT: {short_vol:.2f}\n"
+        f"💰 USD total: ${usd_total:,.2f}\n"
     )
 
+text = "\n".join(lines)
+await query.edit_message_text(text, parse_mode="Markdown")
 
-    text = "\n".join(lines)
-    await query.edit_message_text(text, parse_mode="Markdown")
 
 # Función que obtiene el resumen según periodo (en horas)
 async def generate_summary(addresses, period_hours):
