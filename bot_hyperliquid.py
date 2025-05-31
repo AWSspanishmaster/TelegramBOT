@@ -384,11 +384,13 @@ async def main():
     app.add_handler(CommandHandler("list", list_addresses))
     app.add_handler(CommandHandler("remove", remove))
     app.add_handler(CommandHandler("positions", positions))
-    app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(CommandHandler("summary", summary_command))  # ✅ CAMBIO AQUÍ
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))
-    app.add_handler(CallbackQueryHandler(summary_button_handler, pattern="^summary_"))
+    app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))      # ✅ CAMBIO AQUÍ
+    app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_back$")) # ✅ BACK BUTTON
     app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))
+
 
     # Inicia bot manualmente
     await app.initialize()
