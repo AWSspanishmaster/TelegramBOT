@@ -3,6 +3,7 @@ import logging
 import aiohttp
 import asyncio
 import nest_asyncio
+from collections import defaultdict
 from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -48,6 +49,47 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text(
             "Welcome! Please choose an option:", reply_markup=reply_markup
         )
+
+# ALERTAS
+previous_fills = {}  # user_id -> address -> last_fill_time
+
+async def monitor_fills(application: Application):
+    while True:
+        for user_id, addr_map in user_addresses.items():
+            for address, name in addr_map.items():
+                fills = await fetch_fills(address)
+                if not fills:
+                    continue
+
+                latest_fill = fills[0]
+                last_seen_time = previous_fills.get(user_id, {}).get(address, 0)
+
+                if latest_fill["time"] > last_seen_time:
+                    previous_fills.setdefault(user_id, {})[address] = latest_fill["time"]
+
+                    # Extraer info
+                    coin = latest_fill["coin"]
+                    sz = float(latest_fill["sz"])
+                    px = float(latest_fill["px"])
+                    side = latest_fill["dir"]  # 'L' o 'S'
+                    is_close = latest_fill.get("closed", False)  # depende de la API
+                    lev = latest_fill.get("leverage", "x")  # si no viene, puedes omitir
+
+                    side_txt = "LONG" if side == "L" else "SHORT"
+                    action = "Close" if is_close else "Open"
+                    usd = sz * px
+                    madrid_time = datetime.now(tz=timezone.utc).astimezone().astimezone().strftime("%Y-%m-%d %H:%M")
+
+                    text = (
+                        f"💼 {name}\n"
+                        f"🔔 {action} {side_txt} {lev}x\n"
+                        f"💰 {sz:,.2f} {coin} (${usd:,.2f})\n"
+                        f"🕒 {madrid_time} (Madrid)"
+                    )
+
+                    await application.bot.send_message(chat_id=user_id, text=text)
+
+        await asyncio.sleep(30)  # chequeo cada 30 segundos
 
 # Botón "Add" desde menú
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -190,7 +232,9 @@ async def fetch_fills(address: str):
         logging.error(f"Exception fetching fills for {address}: {e}")
         return None
 
-# Comando /summary muestra botones
+from collections import defaultdict
+
+# Comando /summary con botones de timeframe
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     keyboard = [
         [InlineKeyboardButton("1h", callback_data="summary_1h"),
@@ -205,76 +249,74 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE, from_butto
     else:
         await update.message.reply_text("⏱️ Select timeframe:", reply_markup=reply_markup)
 
-# Maneja botones de resumen
+# Handler para los botones de resumen
 async def summary_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     timeframe = query.data.split("_")[1]
     user_id = query.from_user.id
     addresses = user_addresses.get(user_id, {})
+
     if not addresses:
         await query.edit_message_text("📭 No addresses added.")
         return
 
+    await query.edit_message_text(f"⏳ Fetching fills for last {timeframe}... Please wait.")
+    summary_text = await generate_summary(user_id, timeframe)
+    await query.message.reply_text(summary_text)
+
+# Lógica central de generación de resumen
+async def generate_summary(user_id: int, timeframe: str):
+    addresses = user_addresses.get(user_id, {})
     valid_times = {"1h": 3600, "6h": 21600, "12h": 43200, "24h": 86400}
     timeframe_seconds = valid_times.get(timeframe)
     now_ts = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
     cutoff_ts = now_ts - timeframe_seconds * 1000
 
-    summary_data = {}
-    await query.edit_message_text(f"⏳ Fetching fills for last {timeframe}... Please wait.")
+    coin_data = defaultdict(lambda: {
+        "long_wallets": set(),
+        "short_wallets": set(),
+        "long_usd": 0.0,
+        "short_usd": 0.0
+    })
 
-    for address in addresses:
-        fills = await fetch_fills(address)
+    for addr, name in addresses.items():
+        fills = await fetch_fills(addr)
         if not fills:
             continue
+
         for fill in fills:
-            try:
-                fill_time = fill.get("time", 0)
-                if fill_time < cutoff_ts:
-                    continue
-                coin = fill.get("coin")
-                size = float(fill.get("sz", 0))
-                price = float(fill.get("px", 0))
-                direction = fill.get("dir", "").lower()
+            if fill["time"] < cutoff_ts:
+                continue
+            coin = fill["coin"]
+            sz = float(fill["sz"])
+            px = float(fill["px"])
+            usd = sz * px
+            side = fill["dir"]
 
-                if coin not in summary_data:
-                    summary_data[coin] = {
-                        "volume": 0.0,
-                        "usd_volume": 0.0,
-                        "wallets": set(),
-                        "long_volume": 0.0,
-                        "short_volume": 0.0,
-                    }
+            if side == "L":
+                coin_data[coin]["long_wallets"].add(addr)
+                coin_data[coin]["long_usd"] += usd
+            elif side == "S":
+                coin_data[coin]["short_wallets"].add(addr)
+                coin_data[coin]["short_usd"] += usd
 
-                summary_data[coin]["volume"] += size
-                summary_data[coin]["usd_volume"] += size * price
-                summary_data[coin]["wallets"].add(address)
-                if direction == "long":
-                    summary_data[coin]["long_volume"] += size
-                elif direction == "short":
-                    summary_data[coin]["short_volume"] += size
+    ordered = sorted(coin_data.items(), key=lambda x: x[1]["long_usd"] + x[1]["short_usd"], reverse=True)
 
-            except Exception as e:
-                logging.error(f"Error procesando fill: {e}")
-
-    if not summary_data:
-        await query.message.reply_text("⚠️ No fills found in the given timeframe.")
-        return
-
-    sorted_coins = sorted(summary_data.items(), key=lambda x: x[1]["volume"], reverse=True)[:10]
-
-    lines = [f"Most traded coins in the last {timeframe}:"]
-    for i, (coin, data) in enumerate(sorted_coins, 1):
-        vol = data["volume"]
-        usd = data["usd_volume"]
-        wallets = len(data["wallets"])
-        long_pct = round(100 * data["long_volume"] / vol) if vol else 0
+    lines = [f"📊 Most traded coins in the last {timeframe}:"]
+    for i, (coin, data) in enumerate(ordered, start=1):
+        total_usd = data["long_usd"] + data["short_usd"]
+        total_wallets = len(data["long_wallets"] | data["short_wallets"])
+        if total_wallets == 0:
+            continue
+        long_pct = (len(data["long_wallets"]) / total_wallets) * 100
         short_pct = 100 - long_pct
 
-        lines.append(f"{i}.- {vol:,.2f} {coin} (${usd:,.2f})\nLong {long_pct}% vs Short {short_pct}% (Wallets: {wallets})")
+        lines.append(f"{i}.- {total_usd:,.2f} USD in {coin}")
+        lines.append(f"📈 Long {long_pct:.0f}% vs 📉 Short {short_pct:.0f}% (Wallets: {total_wallets})")
 
-    await query.message.reply_text("\n".join(lines))
+    return "\n".join(lines) if len(lines) > 1 else "⚠️ No operations in timeframe."
 
 # Servidor HTTP básico para evitar timeout en Render
 async def handle_root(request):
