@@ -226,20 +226,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = []
-for coin, data in coin_summary.items():
-    long_vol = data["long"]
-    short_vol = data["short"]
-    usd_total = data["usd"]
+    for coin, data in coin_summary.items():
+        long_vol = data["long"]
+        short_vol = data["short"]
+        usd_total = data["usd"]
 
-    lines.append(
-        f"🪙 {coin}\n"
-        f"🟢 LONG: {long_vol:.2f}\n"
-        f"🔴 SHORT: {short_vol:.2f}\n"
-        f"💰 USD total: ${usd_total:,.2f}\n"
-    )
+        lines.append(
+            f"🪙 {coin}\n"
+            f"🟢 LONG: {long_vol:.2f}\n"
+            f"🔴 SHORT: {short_vol:.2f}\n"
+            f"💰 USD total: ${usd_total:,.2f}\n"
+        )
 
-text = "\n".join(lines)
-await query.edit_message_text(text, parse_mode="Markdown")
+    text = "\n".join(lines)
+    await query.edit_message_text(text, parse_mode="Markdown")
+
 
 
 # Función que obtiene el resumen según periodo (en horas)
@@ -382,12 +383,18 @@ async def main():
     app.add_handler(CommandHandler("list", list_addresses))
     app.add_handler(CommandHandler("remove", remove))
     app.add_handler(CommandHandler("positions", positions))
-    app.add_handler(CommandHandler("summary", summary_command))  # ✅ CAMBIO AQUÍ
+    app.add_handler(CommandHandler("summary", summary_command))  # ✅ Comando /summary
+
+    # CallbackQueryHandlers: orden IMPORTANTE
+    app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))      # ✅ Summary period buttons
+    app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_back$")) # ✅ Back button
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))             # ✅ Menú general
+    app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))              # ✅ Direcciones 0x
+    app.add_handler(CallbackQueryHandler(button_handler))                             # ✅ Otros botones sin patrón
+
+    # Mensajes normales
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button_handler, pattern="^0x"))
-    app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))      # ✅ CAMBIO AQUÍ
-    app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_back$")) # ✅ BACK BUTTON
-    app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))
+
 
 
     # Inicia bot manualmente
