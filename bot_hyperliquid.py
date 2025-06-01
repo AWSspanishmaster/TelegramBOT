@@ -463,8 +463,7 @@ async def monitor_wallets(app):
                         dt = datetime.utcfromtimestamp(fill["time"] / 1000) + timedelta(hours=2)
                         dt_str = dt.strftime("%d/%m/%Y %H:%M")
                         text_alert = (
-                            f"📡 <b>{
-name}</b>\n"
+                            f"📡 <b>{name}</b>\n"
                             f"🟢 <b>Open {side}</b> {size} {coin} (${total:,.2f})\n"
                             f"🕒 {dt_str} UTC+2"
                         )
@@ -551,5 +550,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
