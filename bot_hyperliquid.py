@@ -216,7 +216,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Callback de botones de /positions: llama a accountSummary y muestra posiciones.
+    Callback de botones de /positions: usa clearinghouseState para mostrar posiciones.
     """
     query = update.callback_query
     await query.answer()
@@ -226,7 +226,7 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     logging.info(f"positions_callback triggered for chat_id={chat_id}, address={address}")
 
     url = "https://api.hyperliquid.xyz/info"
-    payload = {"type": "accountSummary", "user": address}
+    payload = {"type": "clearinghouseState", "user": address}
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(url, json=payload) as resp:
@@ -245,16 +245,18 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.message.reply_text("Error retrieving positions (exception).")
             return
 
-    positions = data.get("positions", [])
+    # En la respuesta de clearinghouseState, las posiciones abiertas están en data["assetPositions"]
+    positions = data.get("assetPositions", [])
     if not positions:
         await query.message.reply_text("No open positions.")
         return
 
     lines = ["📈 <b>Open Positions</b>"]
     for p in positions:
-        coin = p.get("coin")
-        size = float(p.get("sz", 0))
-        side_txt = "LONG" if p.get("side", "").upper() == "L" else "SHORT"
+        pos = p.get("position", {})
+        coin = pos.get("coin")
+        size = float(pos.get("szi", 0))
+        side_txt = "LONG" if size > 0 else "SHORT"
         lines.append(f"{coin}: <b>{side_txt}</b> {abs(size)}")
 
     await query.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -403,6 +405,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
