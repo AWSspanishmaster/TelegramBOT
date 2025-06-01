@@ -2,6 +2,7 @@ import logging
 import json
 import aiohttp
 import os
+from aiohttp import web
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -9,11 +10,11 @@ from telegram.ext import (
 )
 from aiohttp import web
 
+#TOKEN
 TOKEN = os.getenv("TOKEN")
-# ... tu código base intacto arriba ...
 
 user_data = {}
-latest_fills = {}  # Para evitar alertas duplicadas
+latest_fills = {} 
 
 async def fetch_fills(address, timeframe_minutes):
     url = f"https://api.hyperliquid.xyz/info"
@@ -154,12 +155,19 @@ app.post_init(on_startup)
 # Mantener el servidor activo en Render
 async def handle(request):
     return web.Response(text="Bot is running")
-app_runner = web.AppRunner(web.Application().add_routes([web.get("/", handle)]))
 
 async def start_bot():
+    # Crear la app aiohttp y agregar ruta
+    app_web = web.Application()
+    app_web.add_routes([web.get("/", handle)])
+
+    # Crear runner y site con puerto 10000
+    app_runner = web.AppRunner(app_web)
     await app_runner.setup()
     site = web.TCPSite(app_runner, "0.0.0.0", 10000)
     await site.start()
+
+    # Ejecutar polling del bot Telegram (suponiendo que 'app' es tu ApplicationBuilder)
     await app.run_polling()
 
 if __name__ == "__main__":
