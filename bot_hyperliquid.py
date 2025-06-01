@@ -5,46 +5,66 @@ from aiohttp import web
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 )
 import asyncio
 
+# -----------------------
+# Configuración inicial
+# -----------------------
+
 TOKEN = os.getenv("TOKEN")
 
-user_data = {}
-latest_fills = {}
+# Diccionarios globales
+user_data = {}     # { chat_id: [ {"address": "...", "name": "..."} , ... ] }
+latest_fills = {}  # Para evitar alertas duplicadas: { "address-time": True }
 
-async def fetch_fills(address, timeframe_minutes):
+# -----------------------
+# Funciones auxiliares
+# -----------------------
+
+async def fetch_fills(address: str, timeframe_minutes: int):
+    """Llama al endpoint userFills de Hyperliquid y filtra las operaciones en los últimos timeframe_minutes."""
     url = "https://api.hyperliquid.xyz/info"
-    body = {
+    payload = {
         "type": "userFills",
         "user": address
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body) as resp:
+        async with session.post(url, json=payload) as resp:
             data = await resp.json()
             fills = data.get("userFills", {}).get("fills", [])
             now = datetime.utcnow()
-            filtered = [
+            resultado = [
                 fill for fill in fills
                 if now - datetime.utcfromtimestamp(fill["time"] / 1000) <= timedelta(minutes=timeframe_minutes)
             ]
-            return filtered
+            return resultado
+
+# -----------------------
+# Handlers de Telegram
+# -----------------------
 
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /summary: muestra botones para elegir rango de tiempo."""
     keyboard = [
         [InlineKeyboardButton("1h", callback_data="summary_60")],
         [InlineKeyboardButton("6h", callback_data="summary_360")],
         [InlineKeyboardButton("12h", callback_data="summary_720")],
         [InlineKeyboardButton("24h", callback_data="summary_1440")],
     ]
-    await update.message.reply_text("Select a time range:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        "Select a time range:", 
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback cuando el usuario pulsa uno de los botones de /summary."""
     query = update.callback_query
     await query.answer()
+
     chat_id = query.message.chat.id
-    period = int(query.data.split("_")[1])
+    period = int(query.data.split("_")[1])      # Ej. "summary_60" → period = 60
     addresses = user_data.get(chat_id, [])
 
     if not addresses:
@@ -56,6 +76,7 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for addr in addresses:
         fills = await fetch_fills(addr["address"], period)
         if fills:
+            # Calcula volumen total en USD (asumiendo coin * size como aproximación)
             total_volume = sum(abs(float(f["coin"]) * float(f["size"])) for f in fills)
             msg_lines.append(f"\n<b>{addr['name']}</b>\n💰 ${total_volume:,.2f}")
         else:
@@ -64,6 +85,7 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("\n".join(msg_lines), parse_mode="HTML")
 
 async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /positions: muestra botones con cada wallet para ver posiciones abiertas."""
     chat_id = update.message.chat.id
     addresses = user_data.get(chat_id, [])
 
@@ -75,20 +97,26 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(addr["name"], callback_data=f"positions_{addr['address']}")]
         for addr in addresses
     ]
-    await update.message.reply_text("Select a wallet to view positions:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        "Select a wallet to view positions:", 
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback cuando el usuario pulsa un botón de /positions para ver posiciones abiertas."""
     query = update.callback_query
     await query.answer()
+
+    # Extrae la dirección: "positions_0x123..." → "0x123..."
     address = query.data.split("_", 1)[1]
 
     url = "https://api.hyperliquid.xyz/info"
-    body = {
+    payload = {
         "type": "userState",
         "user": address
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=body) as resp:
+        async with session.post(url, json=payload) as resp:
             data = await resp.json()
             positions = data.get("userState", {}).get("assetPositions", [])
 
@@ -107,7 +135,17 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_text("\n".join(lines), parse_mode="HTML")
 
+# -----------------------
+# Monitoreo y alertas
+# -----------------------
+
 async def monitor_wallets(app):
+    """
+    Tarea asíncrona que repite cada 20 segundos:
+    - Revisa las wallet de cada chat en user_data.
+    - Llama a fetch_fills() para ver operaciones en últimos 10 minutos.
+    - Si hay un fill nuevo (según timestamp), envía alerta al chat correspondiente.
+    """
     while True:
         for chat_id, wallets in user_data.items():
             for wallet in wallets:
@@ -118,7 +156,7 @@ async def monitor_wallets(app):
                 for fill in fills:
                     key = f"{address}-{fill['time']}"
                     if key not in latest_fills:
-                        latest_fills[key] = True  # Evitar repetir
+                        latest_fills[key] = True  # Marcar como ya notificado
                         coin = fill["coin"]
                         size = float(fill["size"])
                         side = "LONG" if fill["isTaker"] else "SHORT"
@@ -138,21 +176,32 @@ async def monitor_wallets(app):
         await asyncio.sleep(20)
 
 async def on_startup(app):
+    """Esta función se registra en post_init: arranca la tarea de monitoreo."""
     app.create_task(monitor_wallets(app))
 
-# Crear la app y registrar handlers
+# -----------------------
+# Inicializar bot
+# -----------------------
+
+# Construye la aplicación y registra on_startup en el builder
 app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 
+# Registra comandos y callbacks
 app.add_handler(CommandHandler("summary", summary_command))
 app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
 app.add_handler(CommandHandler("positions", positions_command))
 app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
 
-# Servidor aiohttp para mantener vivo el bot en Render
+# -----------------------
+# Servidor aiohttp (puerto 10000)
+# -----------------------
+
 async def handle(request):
     return web.Response(text="Bot is running")
 
 async def start_web_server():
+    """Inicia un servidor aiohttp simple en /
+    que responde "Bot is running" para mantener Render contento."""
     app_web = web.Application()
     app_web.add_routes([web.get("/", handle)])
     runner = web.AppRunner(app_web)
@@ -160,28 +209,21 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", 10000)
     await site.start()
 
-async def main():
-    # Iniciar servidor web aiohttp
-    await start_web_server()
+# -----------------------
+# Función principal
+# -----------------------
 
-    # Iniciar bot (sin asyncio.run)
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+async def main():
+    # 1) Arrancar servidor web en background (no bloqueante)
+    asyncio.create_task(start_web_server())
+
+    # 2) Iniciar el bot con run_polling (inicializa, arranca y hace polling)
+    await app.run_polling()
 
 if __name__ == "__main__":
-    import threading
+    # Sólo ejecutamos run_polling() desde aquí; NO usamos asyncio.run(app.run_polling())
+    asyncio.run(main())
 
-    # Ejecutar el loop principal sin asyncio.run para evitar conflicto event loop
-    # Lanza main() en el event loop actual con asyncio.run_coroutine_threadsafe si quieres,
-    # o simplemente usar asyncio.run(main()) **solo si no usas app.run_polling()**
-    # Aquí simplemente arrancamos el loop principal con asyncio.run(main()), porque no se usa app.run_polling().
-
-    # Pero para evitar problemas, lo mejor es hacer así:
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
 
 
 
