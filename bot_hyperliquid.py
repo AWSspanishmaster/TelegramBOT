@@ -161,16 +161,13 @@ async def start_web_server():
     await site.start()
 
 async def main():
-    # Iniciar servidor web aiohttp
-    await start_web_server()
+    # Ejecutar servidor web en background concurrentemente
+    asyncio.create_task(start_web_server())
 
-    # Iniciar bot Telegram sin run_polling para evitar error event loop running
-    await app.start()
-    await app.updater.start_polling()
-
-    # Mantener el programa vivo
-    await asyncio.Event().wait()
+    # Ejecutar bot con run_polling que se encarga de init, start y polling
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
