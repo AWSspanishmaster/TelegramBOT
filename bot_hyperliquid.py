@@ -7,8 +7,6 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    BotCommand,
-    MenuButtonCommands
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -17,7 +15,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
-    Application
 )
 import asyncio
 
@@ -46,11 +43,6 @@ latest_fills = {}
 # -----------------------
 
 async def fetch_fills(address: str, timeframe_minutes: int):
-    """
-    Llama al endpoint userFills de Hyperliquid y filtra operaciones
-    realizadas en los últimos timeframe_minutes.
-    Se adapta si la respuesta viene como lista o como dict.
-    """
     url = "https://api.hyperliquid.xyz/info"
     payload = {"type": "userFills", "user": address}
     async with aiohttp.ClientSession() as session:
@@ -88,9 +80,6 @@ async def fetch_fills(address: str, timeframe_minutes: int):
 # -----------------------
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Comando /start: muestra menú con opciones.
-    """
     keyboard = [
         [InlineKeyboardButton("➕ Add", callback_data="menu_add")],
         [InlineKeyboardButton("✏️ Edit", callback_data="menu_edit")],
@@ -106,9 +95,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text("Welcome! Please choose an option:", reply_markup=reply_markup)
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Maneja los botones del menú (/start).
-    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -131,17 +117,11 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await summary_command(update, context, from_button=True)
 
 async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Comando /add: inicia flujo para añadir dirección.
-    """
     chat_id = update.effective_user.id
     user_states[chat_id] = {"stage": "awaiting_address_add"}
     await update.message.reply_text("✍️ Please send the address (0x...):")
 
 async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Comando /remove <address> o flujo para eliminar dirección desde menú.
-    """
     chat_id = update.effective_user.id
     if context.args:
         address = context.args[0]
@@ -157,9 +137,6 @@ async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Please send the address you want to remove (0x...):")
 
 async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Comando /edit <address> <new_name> o flujo para renombrar wallet.
-    """
     chat_id = update.effective_user.id
     if len(context.args) >= 2:
         address = context.args[0]
@@ -180,9 +157,6 @@ async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✍️ Please send the address you want to edit (0x...):")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Maneja los mensajes de texto para los flujos de /add, /remove, /edit.
-    """
     chat_id = update.effective_user.id
     text = update.message.text.strip()
 
@@ -192,7 +166,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = user_states[chat_id]
     stage = state["stage"]
 
-    # Flujo /add
     if stage == "awaiting_address_add":
         if not (text.startswith("0x") and len(text) == 42):
             await update.message.reply_text("⚠️ Invalid address format (must start with 0x and be 42 chars).")
@@ -214,7 +187,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states.pop(chat_id, None)
         return
 
-    # Flujo /remove desde menú
     if stage == "awaiting_address_remove":
         address = text
         if not (address.startswith("0x") and len(address) == 42):
@@ -230,7 +202,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_states.pop(chat_id, None)
         return
 
-    # Flujo /edit desde menú
     if stage == "awaiting_address_edit":
         address = text
         if not (address.startswith("0x") and len(address) == 42):
@@ -258,345 +229,183 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
-    """
-    Comando /list: muestra direcciones guardadas.
-    """
     chat_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
-    addresses = user_data.get(chat_id, [])
-    if not addresses:
-        msg = "📭 No addresses added."
+    wallets = user_data.get(chat_id, [])
+    if not wallets:
+        text = "📋 Your wallet list is empty."
     else:
-        lines = [f"{w['name']}: {w['address']}" for w in addresses]
-        msg = "📋 Your addresses:\n" + "\n".join(lines)
-
+        text = "📋 Your wallets:\n\n"
+        for w in wallets:
+            text += f"• {w['name']} — `{w['address']}`\n"
     if from_button:
-        await update.callback_query.edit_message_text(msg)
+        await update.callback_query.edit_message_text(text)
     else:
-        await update.message.reply_text(msg)
+        await update.message.reply_text(text, parse_mode="Markdown")
 
 async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
-    """
-    Comando /positions: muestra botones con cada wallet para ver posiciones abiertas.
-    """
     chat_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
-    addresses = user_data.get(chat_id, [])
-    if not addresses:
-        msg = "📭 No addresses added."
+    wallets = user_data.get(chat_id, [])
+    if not wallets:
+        text = "📌 Your wallet list is empty."
         if from_button:
-            await update.callback_query.edit_message_text(msg)
+            await update.callback_query.edit_message_text(text)
         else:
-            await update.message.reply_text(msg)
+            await update.message.reply_text(text)
         return
 
-    keyboard = [
-        [InlineKeyboardButton(w["name"], callback_data=f"positions_{w['address']}")]
-        for w in addresses
-    ]
-    if from_button:
-        await update.callback_query.edit_message_text("📌 Select a wallet:", reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update.message.reply_text("📌 Select a wallet:", reply_markup=InlineKeyboardMarkup(keyboard))
+    # Construir listado con botones para seleccionar wallet
+    keyboard = []
+    for w in wallets:
+        keyboard.append([InlineKeyboardButton(w["name"], callback_data=f"pos_{w['address']}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Callback de botones de /positions: usa clearinghouseState para mostrar posiciones.
-    Incluye botón de refresh.
-    """
+    if from_button:
+        await update.callback_query.edit_message_text("Select a wallet to view positions:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("Select a wallet to view positions:", reply_markup=reply_markup)
+
+async def position_detail_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     chat_id = query.from_user.id
-    address = query.data.split("_", 1)[1]
-
-    logging.info(f"positions_callback triggered for chat_id={chat_id}, address={address}")
-
-    url = "https://api.hyperliquid.xyz/info"
-    payload = {"type": "clearinghouseState", "user": address}
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, json=payload) as resp:
-                if resp.status != 200:
-                    await query.message.reply_text(f"Error {resp.status} retrieving positions.")
-                    return
-                content_type = resp.headers.get("Content-Type", "")
-                if "application/json" not in content_type:
-                    text = await resp.text()
-                    logging.error(f"positions_callback: respuesta no JSON ({content_type}): {text}")
-                    await query.message.reply_text("Error retrieving positions (invalid response).")
-                    return
-                data = await resp.json()
-        except Exception as e:
-            logging.error(f"positions_callback: excepción al llamar a la API: {e}")
-            await query.message.reply_text("Error retrieving positions (exception).")
-            return
-
-    positions = data.get("assetPositions", [])
-    if not positions:
-        await query.message.reply_text("No open positions.")
+    data = query.data
+    if not data.startswith("pos_"):
         return
+    address = data[4:]
 
-    lines = ["📈 <b>Open Positions</b>"]
-    for p in positions:
-        pos = p.get("position", {})
-        coin = pos.get("coin")
-        size = float(pos.get("szi", 0))
-        entry_px = float(pos.get("entryPx", 0))
-        side_txt = "LONG" if size > 0 else "SHORT"
-        usd_value = abs(size) * entry_px
-        status_symbol = "🟢"
-        lines.append(f"{status_symbol} Open {side_txt}")
-        lines.append(f"{abs(size)} {coin} (${usd_value:,.2f})")
+    # Aquí haríamos la consulta real a la API para obtener posiciones abiertas de la wallet
+    # Como ejemplo, pondremos texto ficticio:
+    # Idealmente, crear función async fetch_positions(address) para obtener datos reales
 
-    keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data=f"positions_{address}")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="menu_positions")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
+    # Simulación respuesta:
+    text = (
+        f"📌 Open positions for wallet:\n\n"
+        f"`{address}`\n\n"
+        f"(Aquí irían las posiciones abiertas reales obtenidas de la API)"
+    )
+
+    await query.edit_message_text(text, parse_mode="Markdown")
 
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
-    """
-    Comando /summary: muestra botones para seleccionar rango de tiempo.
-    """
-    keyboard = [
-        [InlineKeyboardButton("1h", callback_data="summary_60")],
-        [InlineKeyboardButton("6h", callback_data="summary_360")],
-        [InlineKeyboardButton("12h", callback_data="summary_720")],
-        [InlineKeyboardButton("24h", callback_data="summary_1440")],
-    ]
-    if from_button:
-        await update.callback_query.edit_message_text(
-            "Select a time range:", 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    else:
-        await update.message.reply_text(
-            "Select a time range:", 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+    chat_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
+    wallets = user_data.get(chat_id, [])
+    if not wallets:
+        text = "📊 Your wallet list is empty."
+        if from_button:
+            await update.callback_query.edit_message_text(text)
+        else:
+            await update.message.reply_text(text)
+        return
 
-async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Callback de botones de /summary: muestra resumen de cada wallet en ese periodo.
-    Incluye botón de refresh.
-    """
+    keyboard = [
+        [
+            InlineKeyboardButton("1h", callback_data="summary_60"),
+            InlineKeyboardButton("6h", callback_data="summary_360"),
+            InlineKeyboardButton("12h", callback_data="summary_720"),
+            InlineKeyboardButton("24h", callback_data="summary_1440"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if from_button:
+        await update.callback_query.edit_message_text("Select timeframe for summary:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text("Select timeframe for summary:", reply_markup=reply_markup)
+
+async def summary_timeframe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     chat_id = query.from_user.id
-    period = int(query.data.split("_")[1])
-
-    logging.info(f"summary_callback triggered for chat_id={chat_id}, period={period}")
-
-    addresses = user_data.get(chat_id, [])
-    if not addresses:
-        await query.message.reply_text("You haven’t added any addresses yet.")
+    data = query.data
+    if not data.startswith("summary_"):
+        return
+    minutes = int(data.split("_")[1])
+    wallets = user_data.get(chat_id, [])
+    if not wallets:
+        await query.edit_message_text("📊 Your wallet list is empty.")
         return
 
-    summary_data = {}
-    wallets_per_coin = {}
+    # Obtener fills de todas las wallets en el timeframe y ordenar por volumen
+    all_fills = []
+    for w in wallets:
+        fills = await fetch_fills(w["address"], minutes)
+        for fill in fills:
+            all_fills.append({"wallet": w["name"], "address": w["address"], "fill": fill})
 
-    for addr in addresses:
-        fills = await fetch_fills(addr["address"], period)
-        for f in fills:
-            coin = f.get("coin", "?")
-            size = float(f.get("sz", 0))
-            price = float(f.get("px", 0))
-            direction = f.get("dir", "").upper()
-            usd = size * price
-
-            if coin not in summary_data:
-                summary_data[coin] = {"long_usd": 0.0, "short_usd": 0.0, "total_amount": 0.0}
-                wallets_per_coin[coin] = set()
-
-            if direction == "L":
-                summary_data[coin]["long_usd"] += usd
-            else:
-                summary_data[coin]["short_usd"] += usd
-
-            summary_data[coin]["total_amount"] += size
-            wallets_per_coin[coin].add(addr["address"])
-
-    if not summary_data:
-        await query.message.reply_text("⚠️ No operations in timeframe.")
+    if not all_fills:
+        await query.edit_message_text("No fills found in the selected timeframe.")
         return
 
+    # Ordenar por volumen (ejemplo: cantidad absoluta del fill)
+    all_fills.sort(key=lambda x: abs(x["fill"].get("size", 0)), reverse=True)
+
+    # Mostrar top 5 fills
     lines = []
-    idx = 1
-    for coin, data in sorted(summary_data.items(), key=lambda x: -x[1]["total_amount"]):
-        total_amount = data["total_amount"]
-        total_usd = data["long_usd"] + data["short_usd"]
-        long_pct = (data["long_usd"] / total_usd * 100) if total_usd > 0 else 0
-        short_pct = (data["short_usd"] / total_usd * 100) if total_usd > 0 else 0
-        wallet_count = len(wallets_per_coin[coin])
+    for item in all_fills[:5]:
+        fill = item["fill"]
+        side = fill.get("side", "N/A")
+        size = fill.get("size", 0)
+        price = fill.get("price", 0)
+        time_ts = fill.get("time", 0) / 1000
+        time_str = datetime.utcfromtimestamp(time_ts).strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(
+            f"Wallet: {item['wallet']}\n"
+            f"Side: {side}\n"
+            f"Size: {size}\n"
+            f"Price: {price}\n"
+            f"Time: {time_str}\n"
+            f"---"
+        )
 
-        lines.append(f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})")
-        lines.append(f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {wallet_count})")
-        idx += 1
-
-    keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data=f"summary_{period}")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="menu_summary")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
-
-# -----------------------
-# Monitoreo y alertas
-# -----------------------
-
-async def monitor_wallets(app):
-    """
-    Revisa cada 20s las wallets de user_data y envía alertas si hay fills nuevos en últimos 10m.
-    """
-    while True:
-        for chat_id, wallets in user_data.items():
-            for wallet in wallets:
-                address = wallet["address"]
-                name = wallet["name"]
-                fills = await fetch_fills(address, 10)
-                for fill in fills:
-                    key = f"{address}-{fill['time']}"
-                    if key not in latest_fills:
-                        latest_fills[key] = True
-                        coin = fill["coin"]
-                        size = float(fill["size"])
-                        side = "LONG" if fill["isTaker"] else "SHORT"
-                        price = float(fill["px"])
-                        total = size * price
-                        dt = datetime.utcfromtimestamp(fill["time"] / 1000) + timedelta(hours=2)
-                        dt_str = dt.strftime("%d/%m/%Y %H:%M")
-                        text_alert = (
-                            f"📡 <b>{name}</b>\n"
-                            f"🟢 <b>Open {side}</b> {size} {coin} (${total:,.2f})\n"
-                            f"🕒 {dt_str} UTC+2"
-                        )
-                        try:
-                            await app.bot.send_message(chat_id=chat_id, text=text_alert, parse_mode="HTML")
-                        except Exception as e:
-                            logging.error(f"Error sending alert: {e}")
-        await asyncio.sleep(20)
-
-async def set_bot_commands(app):
-    """
-    Define la lista de comandos que aparecerán en el botón fijo.
-    """
-    await app.bot.set_my_commands([
-        BotCommand("start",    "🏠 Show main menu"),
-        BotCommand("add",      "➕ Add a new wallet"),
-        BotCommand("edit",     "✏️ Edit a wallet’s name"),
-        BotCommand("remove",   "🗑️ Remove a wallet"),
-        BotCommand("list",     "📋 List your wallets"),
-        BotCommand("positions","📌 Show open positions"),
-        BotCommand("summary",  "📊 Show summary of recent ops"),
-    ])
-
-async def on_startup(app):
-    """
-    Registrado en post_init: arranca monitor_wallets como tarea en background
-    y registra los comandos globales.
-    """
-    app.create_task(monitor_wallets(app))
-    await set_bot_commands(app)
-
-#BOTÓN FIJO
-async def setup_bot(application):
-    await application.bot.set_my_commands([
-        BotCommand("start", "Start the bot"),
-        BotCommand("add", "Add a wallet"),
-        BotCommand("add_bulk", "Add multiple wallets"),
-        BotCommand("list", "List followed wallets"),
-        BotCommand("remove", "Remove a wallet"),
-        BotCommand("positions", "Show open positions"),
-        BotCommand("summary", "Summary of recent trades"),
-    ], scope=None)
-    
-    await application.bot.set_chat_menu_button(
-    menu_button=MenuButtonCommands(), scope=None
-)
-
-async def set_menu_button(app: Application):
-    await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-
-
-def main():
-    application = Application.builder().token(TOKEN).build()
-    application.post_init(setup_bot)
-    application.run_polling()
+    text = "📊 Top fills:\n\n" + "\n".join(lines)
+    await query.edit_message_text(text)
 
 # -----------------------
-# Inicializar bot
+# Ruta web para keep-alive
 # -----------------------
 
-app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
-app.add_handler(CommandHandler("start", start_command))
-app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))
-app.add_handler(CommandHandler("add", add_command))
-app.add_handler(CommandHandler("remove", remove_command))
-app.add_handler(CommandHandler("edit", edit_command))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-app.add_handler(CommandHandler("list", list_command))
-app.add_handler(CommandHandler("positions", positions_command))
-app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
-app.add_handler(CommandHandler("summary", summary_command))
-app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
-
-# -----------------------
-# Servidor aiohttp (puerto 10000)
-# -----------------------
-
-async def handle(request):
+async def web_handler(request):
     return web.Response(text="Bot is running")
 
-async def start_web_server():
-    """
-    Inicia un servidor web en / para mantener Render contento.
-    """
-    app_web = web.Application()
-    app_web.add_routes([web.get("/", handle)])
-    runner = web.AppRunner(app_web)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 10000)
-    await site.start()
-
 # -----------------------
-# Función principal
+# Main
 # -----------------------
 
 async def main():
-    # 1) Arrancar servidor web en background
-    asyncio.create_task(start_web_server())
+    application = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .build()
+    )
 
-    # 2) Inicializar y arrancar bot sin conflictos de event loop
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
+    # Handlers comandos y mensajes
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("add", add_command))
+    application.add_handler(CommandHandler("remove", remove_command))
+    application.add_handler(CommandHandler("edit", edit_command))
+    application.add_handler(CommandHandler("list", list_command))
+    application.add_handler(CommandHandler("positions", positions_command))
+    application.add_handler(CommandHandler("summary", summary_command))
 
-    # 3) Mantener el loop vivo
-    await asyncio.Event().wait()
+    application.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^menu_"))
+    application.add_handler(CallbackQueryHandler(position_detail_handler, pattern=r"^pos_"))
+    application.add_handler(CallbackQueryHandler(summary_timeframe_handler, pattern=r"^summary_"))
+
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
+    # Correr bot en modo polling y también el servidor web con aiohttp para keep-alive
+    runner = web.AppRunner(web.Application())
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+    await site.start()
+
+    # Añadir ruta para web
+    app = runner.app
+    app.router.add_get("/", web_handler)
+
+    logging.info("Bot is running...")
+
+    await application.run_polling()
 
 if __name__ == "__main__":
-    async def main():
-        application = ApplicationBuilder().token(TOKEN).build()
-
-        # Handlers
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("add", add_command))
-        application.add_handler(CommandHandler("remove", remove_command))
-        application.add_handler(CommandHandler("edit", edit_command))
-        application.add_handler(CommandHandler("list", list_command))
-        application.add_handler(CommandHandler("positions", positions_command))
-        application.add_handler(CallbackQueryHandler(menu_handler))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-        # Configura el botón persistente
-        await set_menu_button(application)
-
-        # Ejecuta el bot
-        await application.run_polling()
-
     asyncio.run(main())
-
-
-
-
-
-
