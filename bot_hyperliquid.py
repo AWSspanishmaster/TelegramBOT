@@ -2,15 +2,15 @@ import logging
 import json
 import aiohttp
 import os
-import asyncio
 from aiohttp import web
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 )
+import asyncio
 
-# TOKEN desde variable de entorno
+# TOKEN
 TOKEN = os.getenv("TOKEN")
 
 user_data = {}
@@ -144,26 +144,36 @@ async def on_startup(app):
 
 # Crear la app y registrar handlers
 app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
-
 app.add_handler(CommandHandler("summary", summary_command))
 app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
 app.add_handler(CommandHandler("positions", positions_command))
 app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
 
-# Servidor web para mantener vivo el bot en Render
+async def on_startup(app):
+    app.create_task(monitor_wallets(app))
+
+# Servidor aiohttp para mantener vivo el bot en Render
 async def handle(request):
     return web.Response(text="Bot is running")
 
-async def start_bot():
+async def start_web_server():
     app_web = web.Application()
     app_web.add_routes([web.get("/", handle)])
-
-    app_runner = web.AppRunner(app_web)
-    await app_runner.setup()
-    site = web.TCPSite(app_runner, "0.0.0.0", 10000)
+    runner = web.AppRunner(app_web)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
     await site.start()
 
+async def main():
+    # Iniciar servidor web (aiohttp) y bot Telegram en paralelo
+    await start_web_server()
+    # run_polling es una coroutine, la ejecutamos sin cerrar loop
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(start_bot())
+    # Obtener event loop actual y ejecutamos main sin usar asyncio.run()
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
