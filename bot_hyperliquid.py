@@ -150,8 +150,6 @@ app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
 async def on_startup(app):
     app.create_task(monitor_wallets(app))
 
-app.post_init(on_startup)
-
 # Mantener el servidor activo en Render
 async def handle(request):
     return web.Response(text="Bot is running")
