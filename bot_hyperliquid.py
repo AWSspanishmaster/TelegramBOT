@@ -2,22 +2,22 @@ import logging
 import json
 import aiohttp
 import os
+import asyncio
 from aiohttp import web
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 )
-from aiohttp import web
 
-#TOKEN
+# TOKEN desde variable de entorno
 TOKEN = os.getenv("TOKEN")
 
 user_data = {}
-latest_fills = {} 
+latest_fills = {}
 
 async def fetch_fills(address, timeframe_minutes):
-    url = f"https://api.hyperliquid.xyz/info"
+    url = "https://api.hyperliquid.xyz/info"
     body = {
         "type": "userFills",
         "user": address
@@ -82,10 +82,9 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    chat_id = query.message.chat.id
     address = query.data.split("_")[1]
 
-    url = f"https://api.hyperliquid.xyz/info"
+    url = "https://api.hyperliquid.xyz/info"
     body = {
         "type": "userState",
         "user": address
@@ -101,9 +100,10 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     lines = ["📈 <b>Open Positions</b>"]
     for p in positions:
-        if p.get("position", {}).get("szi", 0) != 0:
+        pos_size = p.get("position", {}).get("szi", 0)
+        if pos_size != 0:
             coin = p["position"]["coin"]
-            size = float(p["position"]["szi"])
+            size = float(pos_size)
             side = "LONG" if size > 0 else "SHORT"
             lines.append(f"{coin}: <b>{side}</b> {abs(size)}")
 
@@ -139,35 +139,31 @@ async def monitor_wallets(app):
                             logging.error(f"Error sending alert: {e}")
         await asyncio.sleep(20)
 
-# Registrar handlers
+async def on_startup(app):
+    app.create_task(monitor_wallets(app))
+
+# Crear la app y registrar handlers
 app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
+
 app.add_handler(CommandHandler("summary", summary_command))
 app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
 app.add_handler(CommandHandler("positions", positions_command))
 app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
 
-# Inicia el monitor de fills al arrancar el bot
-async def on_startup(app):
-    app.create_task(monitor_wallets(app))
-
-# Mantener el servidor activo en Render
+# Servidor web para mantener vivo el bot en Render
 async def handle(request):
     return web.Response(text="Bot is running")
 
 async def start_bot():
-    # Crear la app aiohttp y agregar ruta
     app_web = web.Application()
     app_web.add_routes([web.get("/", handle)])
 
-    # Crear runner y site con puerto 10000
     app_runner = web.AppRunner(app_web)
     await app_runner.setup()
     site = web.TCPSite(app_runner, "0.0.0.0", 10000)
     await site.start()
 
-    # Ejecutar polling del bot Telegram (suponiendo que 'app' es tu ApplicationBuilder)
     await app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(start_bot())
