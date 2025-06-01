@@ -137,7 +137,7 @@ async def monitor_wallets(app):
         await asyncio.sleep(20)
 
 # Registrar handlers
-app = ApplicationBuilder().token("TOKEN").build()
+app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 app.add_handler(CommandHandler("summary", summary_command))
 app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
 app.add_handler(CommandHandler("positions", positions_command))
