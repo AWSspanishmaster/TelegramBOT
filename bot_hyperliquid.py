@@ -58,7 +58,6 @@ async def fetch_fills(address: str, timeframe_minutes: int):
                     return []
 
                 data = await resp.json()
-                # Si la API devolviera una lista directamente, la tratamos como fills
                 if isinstance(data, list):
                     fills = data
                 else:
@@ -137,7 +136,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = user_states[chat_id]
 
-    # 1) Esperando dirección
     if state["stage"] == "awaiting_address":
         if not (text.startswith("0x") and len(text) == 42):
             await update.message.reply_text("⚠️ Invalid address format (must start with 0x and be 42 chars).")
@@ -147,20 +145,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🏷️ Now send a name for this wallet:")
         return
 
-    # 2) Esperando nombre
     if state["stage"] == "awaiting_name":
         name = text
         address = state["address"]
-        # Añadimos a user_data
         user_data.setdefault(chat_id, [])
-        # Verificar duplicado
         exists = any(w["address"] == address for w in user_data[chat_id])
         if exists:
             await update.message.reply_text("⚠️ Address already added.")
         else:
             user_data[chat_id].append({"address": address, "name": name})
             await update.message.reply_text("✅ Address added!")
-        # Limpiamos estado
         user_states.pop(chat_id, None)
         return
 
@@ -252,7 +246,6 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.message.reply_text("Error retrieving positions (exception).")
             return
 
-    # En clearinghouseState, las posiciones abiertas están en data["assetPositions"]
     positions = data.get("assetPositions", [])
     if not positions:
         await query.message.reply_text("No open positions.")
@@ -263,9 +256,14 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         pos = p.get("position", {})
         coin = pos.get("coin")
         size = float(pos.get("szi", 0))
+        entry_px = float(pos.get("entryPx", 0))
         side_txt = "LONG" if size > 0 else "SHORT"
-        # Formato: SHORT 9.57606 BTC
-        lines.append(f"{side_txt} {abs(size)} {coin}")
+        # Volumen en USD
+        usd_value = abs(size) * entry_px
+        # Símbolo para confirmar que está abierto
+        status_symbol = "🟢"
+        lines.append(f"{status_symbol} Open {side_txt}")
+        lines.append(f"{abs(size)} {coin} (${usd_value:,.2f})")
 
     await query.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -306,17 +304,57 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("You haven’t added any addresses yet.")
         return
 
-    msg_lines = [f"📊 <b>Summary ({period//60}h)</b>"]
+    # Acumuladores por coin
+    summary_data = {}
+    wallets_per_coin = {}
+
     for addr in addresses:
         fills = await fetch_fills(addr["address"], period)
-        if fills:
-            # Volumen total en USD: sum(sz * px)
-            total_volume = sum(float(f.get("sz", 0)) * float(f.get("px", 0)) for f in fills)
-            msg_lines.append(f"\n<b>{addr['name']}</b>\n💰 ${total_volume:,.2f}")
-        else:
-            msg_lines.append(f"\n<b>{addr['name']}</b>\nNo activity.")
+        for f in fills:
+            coin = f.get("coin", "?")
+            size = float(f.get("sz", 0))
+            price = float(f.get("px", 0))
+            direction = f.get("dir", "").upper()  # "L" o "S"
+            usd = size * price
 
-    await query.message.reply_text("\n".join(msg_lines), parse_mode="HTML")
+            if coin not in summary_data:
+                summary_data[coin] = {"long_usd": 0.0, "short_usd": 0.0, "total_amount": 0.0}
+                wallets_per_coin[coin] = set()
+
+            # Determinar long vs short
+            if direction == "L":
+                summary_data[coin]["long_usd"] += usd
+            else:
+                summary_data[coin]["short_usd"] += usd
+
+            summary_data[coin]["total_amount"] += size
+            wallets_per_coin[coin].add(addr["address"])
+
+    if not summary_data:
+        await query.message.reply_text("⚠️ No operations in timeframe.")
+        return
+
+    # Construir líneas con el formato deseado
+    lines = []
+    idx = 1
+    for coin, data in sorted(summary_data.items(), key=lambda x: -x[1]["total_amount"]):
+        total_amount = data["total_amount"]
+        total_usd = data["long_usd"] + data["short_usd"]
+        long_pct = (data["long_usd"] / total_usd * 100) if total_usd > 0 else 0
+        short_pct = (data["short_usd"] / total_usd * 100) if total_usd > 0 else 0
+        wallet_count = len(wallets_per_coin[coin])
+
+        # 1.- 19,233.19 HYPE ($634,827.33)
+        # Long 0% vs Short 100% (Wallets: 1)
+        lines.append(
+            f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})"
+        )
+        lines.append(
+            f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {wallet_count})"
+        )
+        idx += 1
+
+    await query.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 # -----------------------
 # Monitoreo y alertas
@@ -414,3 +452,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
