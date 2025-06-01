@@ -513,6 +513,9 @@ async def setup_bot(application):
     menu_button=MenuButtonCommands(), scope=None
 )
 
+async def set_menu_button(app: Application):
+    await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+
 
 def main():
     application = Application.builder().token(TOKEN).build()
@@ -571,7 +574,27 @@ async def main():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
+    async def main():
+        application = ApplicationBuilder().token(TOKEN).build()
+
+        # Handlers
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("add", add_command))
+        application.add_handler(CommandHandler("remove", remove_command))
+        application.add_handler(CommandHandler("edit", edit_command))
+        application.add_handler(CommandHandler("list", list_command))
+        application.add_handler(CommandHandler("positions", positions_command))
+        application.add_handler(CallbackQueryHandler(menu_handler))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+        # Configura el botón persistente
+        await set_menu_button(application)
+
+        # Ejecuta el bot
+        await application.run_polling()
+
     asyncio.run(main())
+
 
 
 
