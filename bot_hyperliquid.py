@@ -45,17 +45,29 @@ async def fetch_fills(address: str, timeframe_minutes: int):
     url = "https://api.hyperliquid.xyz/info"
     payload = {"type": "userFills", "user": address}
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            data = await resp.json()
-            fills = data.get("userFills", {}).get("fills", [])
-            now = datetime.utcnow()
-            resultado = [
-                fill
-                for fill in fills
-                if now - datetime.utcfromtimestamp(fill["time"] / 1000)
-                <= timedelta(minutes=timeframe_minutes)
-            ]
-            return resultado
+        try:
+            async with session.post(url, json=payload) as resp:
+                if resp.status != 200:
+                    logging.error(f"fetch_fills: HTTP {resp.status} para dirección {address}")
+                    return []
+                content_type = resp.headers.get("Content-Type", "")
+                if "application/json" not in content_type:
+                    text = await resp.text()
+                    logging.error(f"fetch_fills: respuesta no JSON ({content_type}): {text}")
+                    return []
+                data = await resp.json()
+                fills = data.get("userFills", {}).get("fills", [])
+                now = datetime.utcnow()
+                resultado = [
+                    fill
+                    for fill in fills
+                    if now - datetime.utcfromtimestamp(fill["time"] / 1000)
+                    <= timedelta(minutes=timeframe_minutes)
+                ]
+                return resultado
+        except Exception as e:
+            logging.error(f"fetch_fills: excepción al llamar a la API: {e}")
+            return []
 
 # -----------------------
 # Handlers de Telegram
@@ -216,10 +228,24 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     url = "https://api.hyperliquid.xyz/info"
     payload = {"type": "userState", "user": address}
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            data = await resp.json()
-            positions = data.get("userState", {}).get("assetPositions", [])
+        try:
+            async with session.post(url, json=payload) as resp:
+                if resp.status != 200:
+                    await query.message.reply_text(f"Error {resp.status} retrieving positions.")
+                    return
+                content_type = resp.headers.get("Content-Type", "")
+                if "application/json" not in content_type:
+                    text = await resp.text()
+                    logging.error(f"positions_callback: respuesta no JSON ({content_type}): {text}")
+                    await query.message.reply_text("Error retrieving positions (invalid response).")
+                    return
+                data = await resp.json()
+        except Exception as e:
+            logging.error(f"positions_callback: excepción al llamar a la API: {e}")
+            await query.message.reply_text("Error retrieving positions (exception).")
+            return
 
+    positions = data.get("userState", {}).get("assetPositions", [])
     if not positions:
         await query.message.reply_text("No open positions.")
         return
@@ -379,5 +405,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
