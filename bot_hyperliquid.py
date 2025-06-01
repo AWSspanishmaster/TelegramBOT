@@ -161,13 +161,27 @@ async def start_web_server():
     await site.start()
 
 async def main():
-    # Ejecutar servidor web en background concurrentemente
-    asyncio.create_task(start_web_server())
+    # Iniciar servidor web aiohttp
+    await start_web_server()
 
-    # Ejecutar bot con run_polling que se encarga de init, start y polling
-    await app.run_polling()
+    # Iniciar bot (sin asyncio.run)
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import threading
+
+    # Ejecutar el loop principal sin asyncio.run para evitar conflicto event loop
+    # Lanza main() en el event loop actual con asyncio.run_coroutine_threadsafe si quieres,
+    # o simplemente usar asyncio.run(main()) **solo si no usas app.run_polling()**
+    # Aquí simplemente arrancamos el loop principal con asyncio.run(main()), porque no se usa app.run_polling().
+
+    # Pero para evitar problemas, lo mejor es hacer así:
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
+
 
 
