@@ -3,7 +3,12 @@ import aiohttp
 import os
 from aiohttp import web
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    BotCommand,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -27,7 +32,8 @@ logging.basicConfig(level=logging.INFO)
 # user_data: { chat_id: [ {"address": "...", "name": "..."} , ... ] }
 user_data = {}
 
-# user_states para el flujo de /add: { chat_id: {"stage": "awaiting_address"/"awaiting_name", "address": "..."} }
+# user_states para los flujos de /add, /remove, /edit:
+# { chat_id: {"stage": "...", "address": "..."} }
 user_states = {}
 
 # latest_fills para evitar alertas duplicadas: { "address-time": True }
@@ -85,6 +91,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     keyboard = [
         [InlineKeyboardButton("➕ Add", callback_data="menu_add")],
+        [InlineKeyboardButton("✏️ Edit", callback_data="menu_edit")],
+        [InlineKeyboardButton("🗑️ Remove", callback_data="menu_remove")],
         [InlineKeyboardButton("📋 List", callback_data="menu_list")],
         [InlineKeyboardButton("📌 Positions", callback_data="menu_positions")],
         [InlineKeyboardButton("📊 Summary", callback_data="menu_summary")],
@@ -105,8 +113,14 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.from_user.id
 
     if data == "menu_add":
-        user_states[chat_id] = {"stage": "awaiting_address"}
+        user_states[chat_id] = {"stage": "awaiting_address_add"}
         await query.edit_message_text("✍️ Please send the address (0x...):")
+    elif data == "menu_edit":
+        user_states[chat_id] = {"stage": "awaiting_address_edit"}
+        await query.edit_message_text("✍️ Please send the address you want to edit (0x...):")
+    elif data == "menu_remove":
+        user_states[chat_id] = {"stage": "awaiting_address_remove"}
+        await query.edit_message_text("✍️ Please send the address you want to remove (0x...):")
     elif data == "menu_list":
         await list_command(update, context, from_button=True)
     elif data == "menu_positions":
@@ -119,33 +133,73 @@ async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Comando /add: inicia flujo para añadir dirección.
     """
     chat_id = update.effective_user.id
-    user_states[chat_id] = {"stage": "awaiting_address"}
+    user_states[chat_id] = {"stage": "awaiting_address_add"}
     await update.message.reply_text("✍️ Please send the address (0x...):")
+
+async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Comando /remove <address> o flujo para eliminar dirección desde menú.
+    """
+    chat_id = update.effective_user.id
+    if context.args:
+        address = context.args[0]
+        addresses = user_data.get(chat_id, [])
+        new_list = [w for w in addresses if w["address"] != address]
+        if len(new_list) < len(addresses):
+            user_data[chat_id] = new_list
+            await update.message.reply_text(f"🗑️ Address removed: {address}")
+        else:
+            await update.message.reply_text("⚠️ Address not found.")
+    else:
+        user_states[chat_id] = {"stage": "awaiting_address_remove"}
+        await update.message.reply_text("✍️ Please send the address you want to remove (0x...):")
+
+async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Comando /edit <address> <new_name> o flujo para renombrar wallet.
+    """
+    chat_id = update.effective_user.id
+    if len(context.args) >= 2:
+        address = context.args[0]
+        new_name = " ".join(context.args[1:])
+        addresses = user_data.get(chat_id, [])
+        found = False
+        for w in addresses:
+            if w["address"] == address:
+                w["name"] = new_name
+                found = True
+                break
+        if found:
+            await update.message.reply_text(f"✏️ Wallet {address} renamed to '{new_name}'.")
+        else:
+            await update.message.reply_text("⚠️ Address not found.")
+    else:
+        user_states[chat_id] = {"stage": "awaiting_address_edit"}
+        await update.message.reply_text("✍️ Please send the address you want to edit (0x...):")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Maneja los mensajes de texto para el flujo de /add:
-    - stage == "awaiting_address": validar y pedir nombre
-    - stage == "awaiting_name": guardar y confirmar
+    Maneja los mensajes de texto para los flujos de /add, /remove, /edit.
     """
     chat_id = update.effective_user.id
     text = update.message.text.strip()
 
     if chat_id not in user_states:
-        return  # No estamos en un flujo de /add
+        return
 
     state = user_states[chat_id]
+    stage = state["stage"]
 
-    if state["stage"] == "awaiting_address":
+    # Flujo /add
+    if stage == "awaiting_address_add":
         if not (text.startswith("0x") and len(text) == 42):
             await update.message.reply_text("⚠️ Invalid address format (must start with 0x and be 42 chars).")
             return
         state["address"] = text
-        state["stage"] = "awaiting_name"
+        state["stage"] = "awaiting_name_add"
         await update.message.reply_text("🏷️ Now send a name for this wallet:")
         return
-
-    if state["stage"] == "awaiting_name":
+    if stage == "awaiting_name_add":
         name = text
         address = state["address"]
         user_data.setdefault(chat_id, [])
@@ -155,6 +209,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             user_data[chat_id].append({"address": address, "name": name})
             await update.message.reply_text("✅ Address added!")
+        user_states.pop(chat_id, None)
+        return
+
+    # Flujo /remove desde menú
+    if stage == "awaiting_address_remove":
+        address = text
+        if not (address.startswith("0x") and len(address) == 42):
+            await update.message.reply_text("⚠️ Invalid address format.")
+            return
+        addresses = user_data.get(chat_id, [])
+        new_list = [w for w in addresses if w["address"] != address]
+        if len(new_list) < len(addresses):
+            user_data[chat_id] = new_list
+            await update.message.reply_text(f"🗑️ Address removed: {address}")
+        else:
+            await update.message.reply_text("⚠️ Address not found.")
+        user_states.pop(chat_id, None)
+        return
+
+    # Flujo /edit desde menú
+    if stage == "awaiting_address_edit":
+        address = text
+        if not (address.startswith("0x") and len(address) == 42):
+            await update.message.reply_text("⚠️ Invalid address format.")
+            return
+        state["address"] = address
+        state["stage"] = "awaiting_name_edit"
+        await update.message.reply_text("🏷️ Send the new name for this wallet:")
+        return
+    if stage == "awaiting_name_edit":
+        new_name = text
+        address = state["address"]
+        addresses = user_data.get(chat_id, [])
+        found = False
+        for w in addresses:
+            if w["address"] == address:
+                w["name"] = new_name
+                found = True
+                break
+        if found:
+            await update.message.reply_text(f"✏️ Wallet {address} renamed to '{new_name}'.")
+        else:
+            await update.message.reply_text("⚠️ Address not found.")
         user_states.pop(chat_id, None)
         return
 
@@ -174,23 +271,6 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_
         await update.callback_query.edit_message_text(msg)
     else:
         await update.message.reply_text(msg)
-
-async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Comando /remove <address>: elimina una dirección de la lista.
-    """
-    chat_id = update.effective_user.id
-    if not context.args:
-        await update.message.reply_text("⚠️ Use: /remove <address>")
-        return
-    address = context.args[0]
-    addresses = user_data.get(chat_id, [])
-    new_list = [w for w in addresses if w["address"] != address]
-    if len(new_list) < len(addresses):
-        user_data[chat_id] = new_list
-        await update.message.reply_text(f"🗑️ Address removed: {address}")
-    else:
-        await update.message.reply_text("⚠️ Address not found.")
 
 async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     """
@@ -218,6 +298,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Callback de botones de /positions: usa clearinghouseState para mostrar posiciones.
+    Incluye botón de refresh.
     """
     query = update.callback_query
     await query.answer()
@@ -258,14 +339,17 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         size = float(pos.get("szi", 0))
         entry_px = float(pos.get("entryPx", 0))
         side_txt = "LONG" if size > 0 else "SHORT"
-        # Volumen en USD
         usd_value = abs(size) * entry_px
-        # Símbolo para confirmar que está abierto
         status_symbol = "🟢"
         lines.append(f"{status_symbol} Open {side_txt}")
         lines.append(f"{abs(size)} {coin} (${usd_value:,.2f})")
 
-    await query.message.reply_text("\n".join(lines), parse_mode="HTML")
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"positions_{address}")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu_positions")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
 
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     """
@@ -291,6 +375,7 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE, fr
 async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Callback de botones de /summary: muestra resumen de cada wallet en ese periodo.
+    Incluye botón de refresh.
     """
     query = update.callback_query
     await query.answer()
@@ -304,7 +389,6 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("You haven’t added any addresses yet.")
         return
 
-    # Acumuladores por coin
     summary_data = {}
     wallets_per_coin = {}
 
@@ -314,14 +398,13 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             coin = f.get("coin", "?")
             size = float(f.get("sz", 0))
             price = float(f.get("px", 0))
-            direction = f.get("dir", "").upper()  # "L" o "S"
+            direction = f.get("dir", "").upper()
             usd = size * price
 
             if coin not in summary_data:
                 summary_data[coin] = {"long_usd": 0.0, "short_usd": 0.0, "total_amount": 0.0}
                 wallets_per_coin[coin] = set()
 
-            # Determinar long vs short
             if direction == "L":
                 summary_data[coin]["long_usd"] += usd
             else:
@@ -334,7 +417,6 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("⚠️ No operations in timeframe.")
         return
 
-    # Construir líneas con el formato deseado
     lines = []
     idx = 1
     for coin, data in sorted(summary_data.items(), key=lambda x: -x[1]["total_amount"]):
@@ -344,17 +426,16 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         short_pct = (data["short_usd"] / total_usd * 100) if total_usd > 0 else 0
         wallet_count = len(wallets_per_coin[coin])
 
-        # 1.- 19,233.19 HYPE ($634,827.33)
-        # Long 0% vs Short 100% (Wallets: 1)
-        lines.append(
-            f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})"
-        )
-        lines.append(
-            f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {wallet_count})"
-        )
+        lines.append(f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})")
+        lines.append(f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {wallet_count})")
         idx += 1
 
-    await query.message.reply_text("\n".join(lines), parse_mode="HTML")
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"summary_{period}")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu_summary")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
 
 # -----------------------
 # Monitoreo y alertas
@@ -382,7 +463,8 @@ async def monitor_wallets(app):
                         dt = datetime.utcfromtimestamp(fill["time"] / 1000) + timedelta(hours=2)
                         dt_str = dt.strftime("%d/%m/%Y %H:%M")
                         text_alert = (
-                            f"📡 <b>{name}</b>\n"
+                            f"📡 <b>{
+name}</b>\n"
                             f"🟢 <b>Open {side}</b> {size} {coin} (${total:,.2f})\n"
                             f"🕒 {dt_str} UTC+2"
                         )
@@ -392,11 +474,27 @@ async def monitor_wallets(app):
                             logging.error(f"Error sending alert: {e}")
         await asyncio.sleep(20)
 
+async def set_bot_commands(app):
+    """
+    Define la lista de comandos que aparecerán en el botón fijo.
+    """
+    await app.bot.set_my_commands([
+        BotCommand("start",    "🏠 Show main menu"),
+        BotCommand("add",      "➕ Add a new wallet"),
+        BotCommand("edit",     "✏️ Edit a wallet’s name"),
+        BotCommand("remove",   "🗑️ Remove a wallet"),
+        BotCommand("list",     "📋 List your wallets"),
+        BotCommand("positions","📌 Show open positions"),
+        BotCommand("summary",  "📊 Show summary of recent ops"),
+    ])
+
 async def on_startup(app):
     """
-    Registrado en post_init: arranca monitor_wallets como tarea en background.
+    Registrado en post_init: arranca monitor_wallets como tarea en background
+    y registra los comandos globales.
     """
     app.create_task(monitor_wallets(app))
+    await set_bot_commands(app)
 
 # -----------------------
 # Inicializar bot
@@ -408,9 +506,10 @@ app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 app.add_handler(CommandHandler("start", start_command))
 app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))
 app.add_handler(CommandHandler("add", add_command))
+app.add_handler(CommandHandler("remove", remove_command))
+app.add_handler(CommandHandler("edit", edit_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CommandHandler("list", list_command))
-app.add_handler(CommandHandler("remove", remove_command))
 app.add_handler(CommandHandler("positions", positions_command))
 app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
 app.add_handler(CommandHandler("summary", summary_command))
@@ -452,4 +551,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
