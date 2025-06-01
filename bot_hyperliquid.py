@@ -1,4 +1,4 @@
-Increible, sigue sin aparecer el boton, revisa el codigo por favor:
+Revisa este códgio a conciencia:
 
 import logging
 import aiohttp
@@ -509,12 +509,8 @@ async def setup_bot(application):
         BotCommand("remove", "Remove a wallet"),
         BotCommand("positions", "Show open positions"),
         BotCommand("summary", "Summary of recent trades"),
-    ], scope=None)
-    
-    await application.bot.set_chat_menu_button(
-    menu_button=MenuButtonCommands(), scope=None
-)
-
+    ])
+    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 def main():
     application = Application.builder().token(TOKEN).build()
@@ -574,3 +570,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+
+
