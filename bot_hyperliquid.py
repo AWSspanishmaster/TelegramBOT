@@ -1,5 +1,3 @@
-Revisa este códgio a conciencia:
-
 import logging
 import aiohttp
 import os
@@ -570,6 +568,11 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+
+
 
 
 
