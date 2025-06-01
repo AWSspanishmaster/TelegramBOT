@@ -216,7 +216,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Callback de botones de /positions: llama a userState y muestra posiciones.
+    Callback de botones de /positions: llama a accountSummary y muestra posiciones.
     """
     query = update.callback_query
     await query.answer()
@@ -226,7 +226,7 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     logging.info(f"positions_callback triggered for chat_id={chat_id}, address={address}")
 
     url = "https://api.hyperliquid.xyz/info"
-    payload = {"type": "userState", "user": address}
+    payload = {"type": "accountSummary", "user": address}
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(url, json=payload) as resp:
@@ -245,19 +245,17 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.message.reply_text("Error retrieving positions (exception).")
             return
 
-    positions = data.get("userState", {}).get("assetPositions", [])
+    positions = data.get("positions", [])
     if not positions:
         await query.message.reply_text("No open positions.")
         return
 
     lines = ["📈 <b>Open Positions</b>"]
     for p in positions:
-        pos_size = p.get("position", {}).get("szi", 0)
-        if pos_size != 0:
-            coin = p["position"]["coin"]
-            size = float(pos_size)
-            side = "LONG" if size > 0 else "SHORT"
-            lines.append(f"{coin}: <b>{side}</b> {abs(size)}")
+        coin = p.get("coin")
+        size = float(p.get("sz", 0))
+        side_txt = "LONG" if p.get("side", "").upper() == "L" else "SHORT"
+        lines.append(f"{coin}: <b>{side_txt}</b> {abs(size)}")
 
     await query.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -405,6 +403,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
