@@ -1,13 +1,15 @@
 import logging
 import json
-from datetime import datetime, timedelta
 import aiohttp
+import os
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 )
 from aiohttp import web
 
+TOKEN = os.getenv("TOKEN")
 # ... tu código base intacto arriba ...
 
 user_data = {}
