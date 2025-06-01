@@ -1,5 +1,4 @@
 import logging
-import json
 import aiohttp
 import os
 from aiohttp import web
@@ -10,7 +9,6 @@ from telegram.ext import (
 )
 import asyncio
 
-# TOKEN
 TOKEN = os.getenv("TOKEN")
 
 user_data = {}
@@ -82,7 +80,7 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    address = query.data.split("_")[1]
+    address = query.data.split("_", 1)[1]
 
     url = "https://api.hyperliquid.xyz/info"
     body = {
@@ -144,13 +142,11 @@ async def on_startup(app):
 
 # Crear la app y registrar handlers
 app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
+
 app.add_handler(CommandHandler("summary", summary_command))
 app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
 app.add_handler(CommandHandler("positions", positions_command))
 app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
-
-async def on_startup(app):
-    app.create_task(monitor_wallets(app))
 
 # Servidor aiohttp para mantener vivo el bot en Render
 async def handle(request):
@@ -165,15 +161,16 @@ async def start_web_server():
     await site.start()
 
 async def main():
-    # Iniciar servidor web (aiohttp) y bot Telegram en paralelo
+    # Iniciar servidor web aiohttp
     await start_web_server()
-    # run_polling es una coroutine, la ejecutamos sin cerrar loop
-    await app.run_polling()
+
+    # Iniciar bot Telegram sin run_polling para evitar error event loop running
+    await app.start()
+    await app.updater.start_polling()
+
+    # Mantener el programa vivo
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    # Obtener event loop actual y ejecutamos main sin usar asyncio.run()
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(main())
-    except (KeyboardInterrupt, SystemExit):
-        pass
+    asyncio.run(main())
+
