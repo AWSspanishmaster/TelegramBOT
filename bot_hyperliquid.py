@@ -507,8 +507,12 @@ async def setup_bot(application):
         BotCommand("remove", "Remove a wallet"),
         BotCommand("positions", "Show open positions"),
         BotCommand("summary", "Summary of recent trades"),
-    ])
-    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    ], scope=None)
+    
+    await application.bot.set_chat_menu_button(
+    menu_button=MenuButtonCommands(), scope=None
+)
+
 
 def main():
     application = Application.builder().token(TOKEN).build()
