@@ -8,6 +8,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     BotCommand,
+    MenuButtonCommands
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -16,6 +17,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
+    Application
 )
 import asyncio
 
@@ -495,13 +497,29 @@ async def on_startup(app):
     app.create_task(monitor_wallets(app))
     await set_bot_commands(app)
 
+#BOTÓN FIJO
+async def setup_bot(application):
+    await application.bot.set_my_commands([
+        BotCommand("start", "Start the bot"),
+        BotCommand("add", "Add a wallet"),
+        BotCommand("add_bulk", "Add multiple wallets"),
+        BotCommand("list", "List followed wallets"),
+        BotCommand("remove", "Remove a wallet"),
+        BotCommand("positions", "Show open positions"),
+        BotCommand("summary", "Summary of recent trades"),
+    ])
+    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+
+def main():
+    application = Application.builder().token(TOKEN).build()
+    application.post_init(setup_bot)
+    application.run_polling()
+
 # -----------------------
 # Inicializar bot
 # -----------------------
 
 app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
-
-# Registro de handlers
 app.add_handler(CommandHandler("start", start_command))
 app.add_handler(CallbackQueryHandler(menu_handler, pattern="^menu_"))
 app.add_handler(CommandHandler("add", add_command))
