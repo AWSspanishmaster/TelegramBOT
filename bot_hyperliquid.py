@@ -264,7 +264,7 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         coin = pos.get("coin")
         size = float(pos.get("szi", 0))
         side_txt = "LONG" if size > 0 else "SHORT"
-        # Nuevo formato: SHORT 9.57606 BTC
+        # Formato: SHORT 9.57606 BTC
         lines.append(f"{side_txt} {abs(size)} {coin}")
 
     await query.message.reply_text("\n".join(lines), parse_mode="HTML")
@@ -310,7 +310,8 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for addr in addresses:
         fills = await fetch_fills(addr["address"], period)
         if fills:
-            total_volume = sum(abs(float(f["coin"]) * float(f["size"])) for f in fills)
+            # Volumen total en USD: sum(sz * px)
+            total_volume = sum(float(f.get("sz", 0)) * float(f.get("px", 0)) for f in fills)
             msg_lines.append(f"\n<b>{addr['name']}</b>\n💰 ${total_volume:,.2f}")
         else:
             msg_lines.append(f"\n<b>{addr['name']}</b>\nNo activity.")
@@ -413,9 +414,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
-
-
