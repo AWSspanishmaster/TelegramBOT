@@ -41,6 +41,7 @@ async def fetch_fills(address: str, timeframe_minutes: int):
     """
     Llama al endpoint userFills de Hyperliquid y filtra operaciones
     realizadas en los últimos timeframe_minutes.
+    Se adapta si la respuesta viene como lista o como dict.
     """
     url = "https://api.hyperliquid.xyz/info"
     payload = {"type": "userFills", "user": address}
@@ -55,13 +56,19 @@ async def fetch_fills(address: str, timeframe_minutes: int):
                     text = await resp.text()
                     logging.error(f"fetch_fills: respuesta no JSON ({content_type}): {text}")
                     return []
+
                 data = await resp.json()
-                fills = data.get("userFills", {}).get("fills", [])
+                # Si la API devolviera una lista directamente, la tratamos como fills
+                if isinstance(data, list):
+                    fills = data
+                else:
+                    fills = data.get("userFills", {}).get("fills", [])
+
                 now = datetime.utcnow()
                 resultado = [
                     fill
                     for fill in fills
-                    if now - datetime.utcfromtimestamp(fill["time"] / 1000)
+                    if now - datetime.utcfromtimestamp(fill.get("time", 0) / 1000)
                     <= timedelta(minutes=timeframe_minutes)
                 ]
                 return resultado
@@ -245,7 +252,7 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.message.reply_text("Error retrieving positions (exception).")
             return
 
-    # En la respuesta de clearinghouseState, las posiciones abiertas están en data["assetPositions"]
+    # En clearinghouseState, las posiciones abiertas están en data["assetPositions"]
     positions = data.get("assetPositions", [])
     if not positions:
         await query.message.reply_text("No open positions.")
@@ -257,7 +264,8 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         coin = pos.get("coin")
         size = float(pos.get("szi", 0))
         side_txt = "LONG" if size > 0 else "SHORT"
-        lines.append(f"{coin}: <b>{side_txt}</b> {abs(size)}")
+        # Nuevo formato: SHORT 9.57606 BTC
+        lines.append(f"{side_txt} {abs(size)} {coin}")
 
     await query.message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -405,6 +413,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
