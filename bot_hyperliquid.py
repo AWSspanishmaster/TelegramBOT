@@ -2,7 +2,7 @@ import logging
 import aiohttp
 import os
 from aiohttp import web
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from telegram import (
     Update,
     InlineKeyboardButton,
