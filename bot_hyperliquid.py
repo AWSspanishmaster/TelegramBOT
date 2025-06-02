@@ -274,28 +274,7 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_
     else:
         await update.message.reply_text(msg)
 
-async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
-    """
-    Comando /positions: muestra botones con cada wallet para ver posiciones abiertas.
-    """
-    chat_id = update.effective_user.id if not from_button else update.callback_query.from_user.id
-    addresses = user_data.get(chat_id, [])
-    if not addresses:
-        msg = "📭 No addresses added."
-        if from_button:
-            await update.callback_query.edit_message_text(msg)
-        else:
-            await update.message.reply_text(msg)
-        return
-
-    keyboard = [
-        [InlineKeyboardButton(w["name"], callback_data=f"positions_{w['address']}")]
-        for w in addresses
-    ]
-    if from_button:
-        await update.callback_query.edit_message_text("📌 Select a wallet:", reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update.message.reply_text("📌 Select a wallet:", reply_markup=InlineKeyboardMarkup(keyboard))
+from datetime import datetime, timezone, timedelta
 
 async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -340,11 +319,20 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         coin = pos.get("coin")
         size = float(pos.get("szi", 0))
         entry_px = float(pos.get("entryPx", 0))
+        open_ts = int(pos.get("timestamp", 0))  # Epoch ms
         side_txt = "LONG" if size > 0 else "SHORT"
         usd_value = abs(size) * entry_px
         status_symbol = "🟢"
-        lines.append(f"{status_symbol} Open {side_txt}")
-        lines.append(f"{abs(size)} {coin} (${usd_value:,.2f})")
+
+        # Convertir timestamp a UTC+2
+        dt_utc = datetime.fromtimestamp(open_ts / 1000, tz=timezone.utc)
+        dt_local = dt_utc + timedelta(hours=2)
+        open_str = dt_local.strftime("%-d/%-m/%y - %H:%M hrs")
+
+        lines.append(f"<b>Open {side_txt}</b>")
+        lines.append(f"{abs(size):,.2f} {coin} (${usd_value:,.2f})")
+        lines.append(f"{open_str}")
+        lines.append(f"Status {status_symbol}\n")
 
     keyboard = [
         [InlineKeyboardButton("🔄 Refresh", callback_data=f"positions_{address}")],
@@ -352,6 +340,7 @@ async def positions_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
+
 
 async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE, from_button=False):
     """
@@ -392,52 +381,70 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     summary_data = {}
-    wallets_per_coin = {}
+wallets_per_coin = {}
+wallets_long_short = {}
 
-    for addr in addresses:
-        fills = await fetch_fills(addr["address"], period)
-        for f in fills:
-            coin = f.get("coin", "?")
-            size = float(f.get("sz", 0))
-            price = float(f.get("px", 0))
-            direction = f.get("dir", "").upper()
-            usd = size * price
+for addr in addresses:
+    fills = await fetch_fills(addr["address"], period)
+    wallet_long_coins = set()
+    wallet_short_coins = set()
 
-            if coin not in summary_data:
-                summary_data[coin] = {"long_usd": 0.0, "short_usd": 0.0, "total_amount": 0.0}
-                wallets_per_coin[coin] = set()
+    for f in fills:
+        coin = f.get("coin", "?")
+        size = float(f.get("sz", 0))
+        price = float(f.get("px", 0))
+        direction = f.get("dir", "").upper()
+        usd = size * price
 
-            if direction == "L":
-                summary_data[coin]["long_usd"] += usd
-            else:
-                summary_data[coin]["short_usd"] += usd
+        if coin not in summary_data:
+            summary_data[coin] = {"long_usd": 0.0, "short_usd": 0.0, "total_amount": 0.0}
+            wallets_per_coin[coin] = set()
+            wallets_long_short[coin] = {"long": set(), "short": set()}
 
-            summary_data[coin]["total_amount"] += size
-            wallets_per_coin[coin].add(addr["address"])
+        if direction == "L":
+            summary_data[coin]["long_usd"] += usd
+            wallet_long_coins.add(coin)
+        elif direction == "S":
+            summary_data[coin]["short_usd"] += usd
+            wallet_short_coins.add(coin)
 
-    if not summary_data:
-        await query.message.reply_text("⚠️ No operations in timeframe.")
-        return
+        summary_data[coin]["total_amount"] += size
+        wallets_per_coin[coin].add(addr["address"])
 
-    lines = []
-    idx = 1
-    for coin, data in sorted(summary_data.items(), key=lambda x: -x[1]["total_amount"]):
-        total_amount = data["total_amount"]
-        total_usd = data["long_usd"] + data["short_usd"]
-        long_pct = (data["long_usd"] / total_usd * 100) if total_usd > 0 else 0
-        short_pct = (data["short_usd"] / total_usd * 100) if total_usd > 0 else 0
-        wallet_count = len(wallets_per_coin[coin])
+    # Registra la wallet como long o short por cada coin
+    for coin in wallet_long_coins:
+        wallets_long_short[coin]["long"].add(addr["address"])
+    for coin in wallet_short_coins:
+        wallets_long_short[coin]["short"].add(addr["address"])
 
-        lines.append(f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})")
-        lines.append(f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {wallet_count})")
-        idx += 1
+if not summary_data:
+    await query.message.reply_text("⚠️ No operations in timeframe.")
+    return
 
-    keyboard = [
-        [InlineKeyboardButton("🔄 Refresh", callback_data=f"summary_{period}")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="menu_summary")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
+lines = []
+idx = 1
+for coin, data in sorted(summary_data.items(), key=lambda x: -x[1]["total_amount"]):
+    total_amount = data["total_amount"]
+    total_usd = data["long_usd"] + data["short_usd"]
+
+    long_wallets = wallets_long_short[coin]["long"]
+    short_wallets = wallets_long_short[coin]["short"]
+    total_wallets = len(long_wallets.union(short_wallets))
+
+    long_pct = (len(long_wallets) / total_wallets * 100) if total_wallets > 0 else 0
+    short_pct = (len(short_wallets) / total_wallets * 100) if total_wallets > 0 else 0
+
+    lines.append(f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})")
+    lines.append(f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {total_wallets})")
+    idx += 1
+
+keyboard = [
+    [InlineKeyboardButton("🔄 Refresh", callback_data=f"summary_{period}")],
+    [InlineKeyboardButton("⬅️ Back", callback_data="menu_summary")],
+]
+reply_markup = InlineKeyboardMarkup(keyboard)
+await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
+
 
 # -----------------------
 # Monitoreo y alertas
