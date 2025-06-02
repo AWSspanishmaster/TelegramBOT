@@ -381,35 +381,36 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     summary_data = {}
-wallets_per_coin = {}
-wallets_long_short = {}
+    wallets_per_coin = {}
+    wallets_long_short = {}
 
-for addr in addresses:
-    fills = await fetch_fills(addr["address"], period)
-    wallet_long_coins = set()
-    wallet_short_coins = set()
+    for addr in addresses:
+        fills = await fetch_fills(addr["address"], period)
+        wallet_long_coins = set()
+        wallet_short_coins = set()
 
-    for f in fills:
-        coin = f.get("coin", "?")
-        size = float(f.get("sz", 0))
-        price = float(f.get("px", 0))
-        direction = f.get("dir", "").upper()
-        usd = size * price
+        for f in fills:
+            coin = f.get("coin", "?")
+            size = float(f.get("sz", 0))
+            price = float(f.get("px", 0))
+            direction = f.get("dir", "").upper()
+            usd = size * price
 
-        if coin not in summary_data:
-            summary_data[coin] = {"long_usd": 0.0, "short_usd": 0.0, "total_amount": 0.0}
-            wallets_per_coin[coin] = set()
-            wallets_long_short[coin] = {"long": set(), "short": set()}
+            if coin not in summary_data:
+                summary_data[coin] = {"long_usd": 0.0, "short_usd": 0.0, "total_amount": 0.0}
+                wallets_per_coin[coin] = set()
+                wallets_long_short[coin] = {"long": set(), "short": set()}
 
-        if direction == "L":
-            summary_data[coin]["long_usd"] += usd
-            wallet_long_coins.add(coin)
-        elif direction == "S":
-            summary_data[coin]["short_usd"] += usd
-            wallet_short_coins.add(coin)
+            if direction == "L":
+                summary_data[coin]["long_usd"] += usd
+                wallet_long_coins.add(coin)
+            elif direction == "S":
+                summary_data[coin]["short_usd"] += usd
+                wallet_short_coins.add(coin)
 
-        summary_data[coin]["total_amount"] += size
-        wallets_per_coin[coin].add(addr["address"])
+            summary_data[coin]["total_amount"] += size
+            wallets_per_coin[coin].add(addr["address"])
+
 
     # Registra la wallet como long o short por cada coin
     for coin in wallet_long_coins:
