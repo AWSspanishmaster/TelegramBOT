@@ -418,33 +418,33 @@ async def summary_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for coin in wallet_short_coins:
         wallets_long_short[coin]["short"].add(addr["address"])
 
-if not summary_data:
-    await query.message.reply_text("⚠️ No operations in timeframe.")
-    return
+    if not summary_data:
+        await query.message.reply_text("⚠️ No operations in timeframe.")
+        return
 
-lines = []
-idx = 1
-for coin, data in sorted(summary_data.items(), key=lambda x: -x[1]["total_amount"]):
-    total_amount = data["total_amount"]
-    total_usd = data["long_usd"] + data["short_usd"]
+    lines = []
+    idx = 1
+    for coin, data in sorted(summary_data.items(), key=lambda x: -x[1]["total_amount"]):
+        total_amount = data["total_amount"]
+        total_usd = data["long_usd"] + data["short_usd"]
 
-    long_wallets = wallets_long_short[coin]["long"]
-    short_wallets = wallets_long_short[coin]["short"]
-    total_wallets = len(long_wallets.union(short_wallets))
+        long_wallets = wallets_long_short[coin]["long"]
+        short_wallets = wallets_long_short[coin]["short"]
+        total_wallets = len(long_wallets.union(short_wallets))
 
-    long_pct = (len(long_wallets) / total_wallets * 100) if total_wallets > 0 else 0
-    short_pct = (len(short_wallets) / total_wallets * 100) if total_wallets > 0 else 0
+        long_pct = (len(long_wallets) / total_wallets * 100) if total_wallets > 0 else 0
+        short_pct = (len(short_wallets) / total_wallets * 100) if total_wallets > 0 else 0
 
-    lines.append(f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})")
-    lines.append(f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {total_wallets})")
-    idx += 1
+        lines.append(f"{idx}.- {total_amount:,.2f} {coin} (${total_usd:,.2f})")
+        lines.append(f"Long {long_pct:.0f}% vs Short {short_pct:.0f}% (Wallets: {total_wallets})")
+        idx += 1
 
-keyboard = [
-    [InlineKeyboardButton("🔄 Refresh", callback_data=f"summary_{period}")],
-    [InlineKeyboardButton("⬅️ Back", callback_data="menu_summary")],
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"summary_{period}")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu_summary")],
 ]
-reply_markup = InlineKeyboardMarkup(keyboard)
-await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=reply_markup)
 
 
 # -----------------------
