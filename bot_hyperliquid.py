@@ -126,7 +126,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu_list":
         await list_command(update, context, from_button=True)
     elif data == "menu_positions":
-        await positions_command(update, context, from_button=True)
+        await positions_callback(update, context, from_button=True)
     elif data == "menu_summary":
         await summary_command(update, context, from_button=True)
 
@@ -536,7 +536,6 @@ app.add_handler(CommandHandler("edit", edit_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CommandHandler("list", list_command))
 app.add_handler(CommandHandler("positions", positions_callback))
-app.add_handler(CommandHandler("positions", positions_command))
 app.add_handler(CallbackQueryHandler(positions_callback, pattern="^positions_"))
 app.add_handler(CommandHandler("summary", summary_command))
 app.add_handler(CallbackQueryHandler(summary_callback, pattern="^summary_"))
